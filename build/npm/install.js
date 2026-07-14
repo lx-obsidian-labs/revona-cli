@@ -15,7 +15,6 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
 const { createHash } = require('crypto');
 
 // ---- Config ------------------------------------------------------------
@@ -26,7 +25,7 @@ const PKG = JSON.parse(
 const VERSION = process.env.REVONA_VERSION || PKG.version;
 const DRY_RUN = process.env.REVONA_DRY_RUN === 'true';
 
-const REPO = 'lx-obsidian/revona-cli';
+const REPO = 'lx-obsidian-labs/revona-cli';
 const BASE_URL = `https://github.com/${REPO}/releases/download/v${VERSION}`;
 
 function getPlatform() {
@@ -100,17 +99,8 @@ function extractZip(zipPath, destDir) {
 }
 
 function extractTarGz(tarPath, destDir) {
-  return new Promise((resolve, reject) => {
-    const { createInflate } = zlib;
-    const tar = require('tar');
-    fs.createReadStream(tarPath)
-      .pipe(createInflate())
-      .pipe(
-        tar.extract({ cwd: destDir, strip: 1 })
-      )
-      .on('finish', () => resolve(destDir))
-      .on('error', reject);
-  });
+  const tar = require('tar');
+  return tar.extract({ file: tarPath, cwd: destDir }).then(() => destDir);
 }
 
 // ---- Install -----------------------------------------------------------
@@ -158,7 +148,7 @@ async function install() {
     console.error('    - No internet connection');
     console.error('    - Binary for this platform has not been built yet');
     console.error('');
-    console.error('  Build it yourself: https://github.com/lx-obsidian/revona-cli');
+    console.error('  Build it yourself: https://github.com/lx-obsidian-labs/revona-cli');
     console.error('');
     process.exit(1);
   }

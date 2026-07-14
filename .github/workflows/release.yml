@@ -58,7 +58,7 @@ jobs:
 
   publish-npm:
     name: Publish to npm
-    needs: [build]
+    needs: [create-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,19 +68,8 @@ jobs:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
 
-      - name: Download all platform binaries
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Prepare npm package
-        run: |
-          mkdir -p npm-dist
-          cp -r build/npm/* npm-dist/
-          cp artifacts/*/* npm-dist/binary/ 2>/dev/null || true
-
       - name: Publish to npm
-        working-directory: npm-dist
+        working-directory: build/npm
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -4,13 +4,13 @@
   "description": "Revona CLI — Autonomous AI Engineering Platform. Built by LX Obsidian Labs.",
   "author": "LX Obsidian Labs",
   "license": "MIT",
-  "homepage": "https://github.com/lx-obsidian/revona-cli",
+  "homepage": "https://github.com/lx-obsidian-labs/revona-cli",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lx-obsidian/revona-cli.git"
+    "url": "git+https://github.com/lx-obsidian-labs/revona-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/lx-obsidian/revona-cli/issues"
+    "url": "https://github.com/lx-obsidian-labs/revona-cli/issues"
   },
   "keywords": [
     "ai",
@@ -38,6 +38,10 @@
   },
   "os": ["win32", "darwin", "linux"],
   "cpu": ["x64", "arm64"],
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "tar": "^7.4.3"
+  },
   "files": [
     "bin/",
     "install.js",
