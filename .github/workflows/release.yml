@@ -25,6 +25,8 @@ jobs:
           - os: windows-latest
             arch: x86_64
             platform: windows
+          # macOS Intel (macos-13) dropped: GitHub Intel runners are deprecated.
+          # Apple Silicon (arm64) covers Macs from 2020+; Intel users can build from source.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
