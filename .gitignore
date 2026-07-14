@@ -18,7 +18,10 @@ __pycache__
 *.pyc
 .env.local
 .next
+build/
 packaging/revona/
+packaging/lib/
+packaging/bdist.*/
 packaging/npm/binary/
 packaging/npm/dist/
 *.egg-info/
