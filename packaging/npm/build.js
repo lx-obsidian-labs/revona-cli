@@ -18,9 +18,11 @@ function getPlatformTag() {
   return `${os}-${arch}`;
 }
 
+const PROJECT_ROOT = path.join(__dirname, '..', '..');
+
 function run(cmd) {
   console.log(`\n  \x1b[36m>\x1b[0m ${cmd}`);
-  execSync(cmd, { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+  execSync(cmd, { stdio: 'inherit', cwd: PROJECT_ROOT });
 }
 
 async function build() {
@@ -40,10 +42,10 @@ async function build() {
   run('pip install pyinstaller');
 
   // Step 2: Run PyInstaller
-  run('pyinstaller --clean --noconfirm build/revona.spec');
+  run('pyinstaller --clean --noconfirm packaging/revona.spec');
 
   // Step 3: Copy binary to dist
-  const pyinstallerDist = path.join(__dirname, '..', 'dist', binaryName);
+  const pyinstallerDist = path.join(PROJECT_ROOT, 'dist', binaryName);
   const outBinary = path.join(outDir, binaryName);
   if (fs.existsSync(pyinstallerDist)) {
     fs.copyFileSync(pyinstallerDist, outBinary);
@@ -51,7 +53,7 @@ async function build() {
 
   // Step 4: Copy bundled data dirs
   for (const dir of ['Skills', 'Blueprints', 'Accelerators', 'AI', '.user']) {
-    const src = path.join(__dirname, '..', dir);
+    const src = path.join(PROJECT_ROOT, dir);
     const dst = path.join(outDir, dir);
     if (fs.existsSync(src)) {
       fs.cpSync(src, dst, { recursive: true });

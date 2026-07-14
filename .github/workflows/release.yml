@@ -38,7 +38,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: pyinstaller --clean --noconfirm build/revona.spec
+        run: pyinstaller --clean --noconfirm packaging/revona.spec
 
       - name: Package binary
         shell: bash
@@ -68,10 +68,32 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Publish to npm
-        working-directory: build/npm
+        working-directory: packaging/npm
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          pyproject-build --outdir dist_pypi
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist_pypi
+          password: ${{ secrets.PYPI_TOKEN }}
 
   create-release:
     name: Create GitHub Release

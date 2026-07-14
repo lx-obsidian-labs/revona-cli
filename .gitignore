@@ -6,6 +6,7 @@ node_modules
 .codex
 out
 dist
+dist_pypi
 *.vsix
 .claude
 CLAUDE.md
@@ -17,8 +18,8 @@ __pycache__
 *.pyc
 .env.local
 .next
-build/revona/
-build/npm/binary/
-build/npm/dist/
+packaging/revona/
+packaging/npm/binary/
+packaging/npm/dist/
 *.egg-info/
 .agent/
