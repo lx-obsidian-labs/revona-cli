@@ -1,0 +1,13 @@
+{
+  "name": "React",
+  "description": "Build React components and applications using modern patterns: functional components, hooks, TypeScript strict mode, and Tailwind CSS styling.",
+  "when_to_use": [
+    "building UI components",
+    "creating React applications",
+    "migrating class components to hooks",
+    "implementing state management",
+    "building forms",
+    "setting up routing"
+  ],
+  "tags": ["react", "frontend", "ui", "components", "hooks", "typescript", "tailwind"]
+}

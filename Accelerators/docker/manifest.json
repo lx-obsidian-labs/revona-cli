@@ -1,0 +1,6 @@
+{
+  "name": "Docker Accelerator",
+  "description": "Production-grade Dockerfile and docker-compose setup for Node.js/Next.js applications.",
+  "tags": ["docker", "node", "nextjs", "production"],
+  "files": ["Dockerfile", "docker-compose.yml", ".dockerignore"]
+}

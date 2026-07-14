@@ -1,0 +1,120 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            platform: linux
+          - os: macos-13
+            arch: x86_64
+            platform: macos
+          - os: macos-14
+            arch: aarch64
+            platform: macos
+          - os: windows-latest
+            arch: x86_64
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller --clean --noconfirm build/revona.spec
+
+      - name: Package binary
+        shell: bash
+        run: |
+          cd dist
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            7z a ../revona-${{ matrix.platform }}-${{ matrix.arch }}.zip revona.exe
+          else
+            tar -czf ../revona-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz revona
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: revona-${{ matrix.platform }}-${{ matrix.arch }}
+          path: revona-${{ matrix.platform }}-${{ matrix.arch }}.*
+
+  publish-npm:
+    name: Publish to npm
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download all platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare npm package
+        run: |
+          mkdir -p npm-dist
+          cp -r build/npm/* npm-dist/
+          cp artifacts/*/* npm-dist/binary/ 2>/dev/null || true
+
+      - name: Publish to npm
+        working-directory: npm-dist
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Revona CLI ${{ github.ref_name }}
+          body: |
+            ## Revona CLI ${{ github.ref_name }}
+
+            Autonomous AI Engineering Platform — built by LX Obsidian Labs.
+
+            ### Installation
+
+            ```bash
+            npm install -g revona-cli
+            ```
+
+            ### Platform binaries
+
+            See attached assets for platform-specific builds.
+          files: artifacts/**/*
+          draft: false
+          prerelease: false

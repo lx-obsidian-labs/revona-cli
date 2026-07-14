@@ -1,0 +1,12 @@
+{
+  "name": "Docker",
+  "description": "Containerize applications with Docker: multi-stage builds, production-ready configurations, Docker Compose for local development.",
+  "when_to_use": [
+    "containerizing an application",
+    "setting up Docker Compose",
+    "creating production Dockerfiles",
+    "optimizing image size",
+    "setting up CI/CD with containers"
+  ],
+  "tags": ["docker", "containers", "deployment", "devops", "infrastructure"]
+}
