@@ -1,0 +1,5 @@
+{
+  "name": "API Service",
+  "description": "RESTful API service architecture with Express/Fastify, OpenAPI docs, rate limiting, auth middleware, and structured error handling.",
+  "tags": ["api", "rest", "backend", "express", "fastify"]
+}

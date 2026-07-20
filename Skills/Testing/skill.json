@@ -1,0 +1,13 @@
+{
+  "name": "Testing",
+  "description": "Write and run tests with Vitest, React Testing Library, and Playwright for e2e. Covers unit, integration, and end-to-end testing strategies.",
+  "when_to_use": [
+    "writing unit tests",
+    "setting up test framework",
+    "adding integration tests",
+    "configuring e2e tests",
+    "improving test coverage",
+    "mocking external services"
+  ],
+  "tags": ["testing", "vitest", "playwright", "rtl", "qa"]
+}

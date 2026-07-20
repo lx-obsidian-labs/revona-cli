@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revona"
+version = "2.0.0"
+description = "Autonomous Software Engineering Operating System — built by LX Obsidian Labs"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "LX Obsidian Labs" }]
+keywords = ["ai", "cli", "coding", "agent", "engineering", "automation", "nvidia", "revona", "mission", "orchestrator"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "openai>=1.30",
+    "click>=8.1",
+    "rich>=13.0",
+    "requests>=2.31",
+]
+
+[project.urls]
+Homepage = "https://github.com/lx-obsidian-labs/revona-cli"
+Repository = "https://github.com/lx-obsidian-labs/revona-cli"
+Issues = "https://github.com/lx-obsidian-labs/revona-cli/issues"
+
+[project.scripts]
+revona = "agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent*"]

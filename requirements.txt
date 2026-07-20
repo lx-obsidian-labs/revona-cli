@@ -1,0 +1,5 @@
+openai>=1.30
+click>=8.1
+rich>=13.0
+requests>=2.31
+httpx>=0.27

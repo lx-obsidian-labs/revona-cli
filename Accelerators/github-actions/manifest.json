@@ -1,0 +1,6 @@
+{
+  "name": "GitHub Actions CI/CD",
+  "description": "CI/CD workflows for Node.js/Next.js projects: lint, test, build, deploy.",
+  "tags": ["github-actions", "ci", "cd", "automation"],
+  "files": ["ci.yml", "cd.yml"]
+}

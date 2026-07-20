@@ -1,0 +1,5 @@
+{
+  "name": "CRUD App",
+  "description": "Standard Create-Read-Update-Delete application architecture with Next.js App Router, Prisma ORM, server actions, and Tailwind UI.",
+  "tags": ["crud", "fullstack", "nextjs", "prisma"]
+}

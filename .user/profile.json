@@ -1,0 +1,26 @@
+{
+  "name": "Nathan",
+  "preferred_stack": {
+    "language": "TypeScript",
+    "framework": "Next.js",
+    "router": "App Router",
+    "styling": "Tailwind CSS",
+    "database": "Prisma",
+    "auth": "NextAuth.js / Auth.js",
+    "testing": "Vitest",
+    "ui": "Dark UI, Enterprise Design"
+  },
+  "principles": [
+    "Minimal dependencies",
+    "Server components by default",
+    "TypeScript strict mode",
+    "Functional components",
+    "Named exports"
+  ],
+  "rules": {
+    "files": "kebab-case",
+    "components": "PascalCase",
+    "functions": "camelCase",
+    "types": "PascalCase prefixed with T"
+  }
+}
