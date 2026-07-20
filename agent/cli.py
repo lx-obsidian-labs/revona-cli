@@ -288,8 +288,9 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
   [bold]/vectors[/] [dim][reindex][/]    Show/refresh Chroma vector index
   [bold]/episodes[/] [dim][n][/]         Show past episodic memories
   [bold]/semantic[/] [dim][query][/]     Query semantic memory (prefs/facts/rules)
-  [bold]/sensory[/]             Show sensory memory buffer
-  [bold]/guardrails[/]          Show active safety guardrails & limits
+   [bold]/sensory[/]             Show sensory memory buffer
+   [bold]/memory[/] [dim][prune][/]    Memory dashboard (all layers) / compact episodes
+   [bold]/guardrails[/]          Show active safety guardrails & limits
 
   [dim]Tip: Use @filename to reference files in your prompt[/]""")
         return client, mdl, messages, history, redo_stack, plan_mode, True
@@ -769,6 +770,49 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
         console.print(f"  Dangerous tools require approval: {', '.join(sorted(DANGEROUS_TOOLS))}")
         for k, v in SAFETY_LIMITS.items():
             console.print(f"  {k}: {v}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/memory":
+        from .agent import _intel
+        from rich.panel import Panel
+        from rich.table import Table
+        d = _intel.memory_dashboard()
+        panel = Panel(f"[bold]Revona Memory Dashboard[/]  [dim]v{VERSION}[/]", border_style="bright_magenta")
+        console.print(panel)
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Layer", style="cyan", no_wrap=True)
+        table.add_column("Metric", style="white")
+        table.add_column("Value", style="green")
+        rag = d["rag"]
+        table.add_row("Sensory", "inputs buffered", str(sum(v for k, v in d["sensory"].items() if isinstance(v, int))))
+        table.add_row("Working", "cached files", str(d["working"]["cached_files"]))
+        table.add_row("Working", "recent msgs", str(d["working"]["recent_messages"]))
+        table.add_row("Episodic", "total episodes", str(d["episodic"].get("total", 0)))
+        if d["episodic"].get("total"):
+            table.add_row("Episodic", "avg duration", f"{d['episodic'].get('avg_duration', 0):.1f}s")
+            table.add_row("Episodic", "total tokens", f"{d['episodic'].get('total_tokens', 0):,}")
+            table.add_row("Episodic", "unique files", str(d["episodic"].get("unique_files", 0)))
+        table.add_row("Semantic", "total facts", str(d["semantic"].get("total", 0)))
+        if d["semantic"].get("by_category"):
+            for cat, c in d["semantic"]["by_category"].items():
+                table.add_row("Semantic", f"  {cat}", str(c))
+        table.add_row("RAG", "backend", str(rag.get("backend", "?")))
+        table.add_row("RAG", "indexed chunks", str(rag.get("total_chunks", 0)))
+        if rag.get("collection"):
+            table.add_row("RAG", "collection", str(rag["collection"]))
+        table.add_row("Experiences", "stored", str(d["experiences"]["total"]))
+        table.add_row("Knowledge Graph", "nodes", str(d["knowledge_graph"]["nodes"]))
+        table.add_row("Skills", "loaded", str(d["skills"]["total"]))
+        if d["brain"].get("files_indexed"):
+            table.add_row("Brain", "files indexed", str(d["brain"]["files_indexed"]))
+        console.print(table)
+        console.print("[dim]Tip: /sensory /episodes /semantic /vectors show detail. Use '/memory prune' to compact episodic memory.[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/memory" and len(parts) > 1 and parts[1] == "prune":
+        from .agent import _intel
+        res = _intel.episodic.prune()
+        console.print(f"[green]Episodic memory pruned:[/] removed {res['removed']}, kept {res['kept']}.")
         return client, mdl, messages, history, redo_stack, plan_mode, True
 
     return client, mdl, messages, history, redo_stack, plan_mode, False

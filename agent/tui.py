@@ -372,7 +372,7 @@ _COMMANDS = [
     "/mv", "/cp", "/rm", "/mkdir",
     "/workspace", "/checkpoints",
     "/lats", "/subagents", "/selfmodify", "/iceberg",
-    "/vectors", "/episodes", "/semantic", "/sensory", "/guardrails",
+    "/vectors", "/episodes", "/semantic", "/sensory", "/memory", "/guardrails",
 ]
 
 

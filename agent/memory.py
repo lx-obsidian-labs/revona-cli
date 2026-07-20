@@ -524,7 +524,60 @@ class EpisodicMemory:
         )
         self._episodes[ep.id] = ep
         self._save(ep)
+        self.prune()
         return ep
+
+    def prune(self, max_episodes: int = 200, age_days: float = 90.0,
+              keep_qualities: tuple[str, ...] = ("excellent", "good")) -> dict:
+        """Auto-prune episodic memory to keep it lean and high-signal.
+
+        Strategy: if over `max_episodes`, drop oldest episodes first, but always
+        keep those whose quality is in `keep_qualities` unless they are also the
+        oldest beyond the cap. Also drop episodes older than `age_days` whose
+        quality is not 'excellent'.
+        """
+        before = len(self._episodes)
+        if before == 0:
+            return {"removed": 0, "kept": 0}
+
+        now = time.time()
+        age_cutoff = now - (age_days * 86400)
+
+        removable = []
+        protected = []
+        for ep in self._episodes.values():
+            if ep.created_at < age_cutoff and ep.quality != "excellent":
+                removable.append(ep)
+            else:
+                protected.append(ep)
+
+        over_cap = len(self._episodes) - max_episodes
+        if over_cap > 0:
+            sorted_all = sorted(self._episodes.values(), key=lambda e: e.created_at)
+            idx = 0
+            while over_cap > 0 and idx < len(sorted_all):
+                ep = sorted_all[idx]
+                if ep in protected and ep.quality in keep_qualities:
+                    idx += 1
+                    continue
+                removable.append(ep)
+                over_cap -= 1
+                idx += 1
+
+        seen = set()
+        actual_removed = 0
+        for ep in removable:
+            if ep.id in seen:
+                continue
+            seen.add(ep.id)
+            try:
+                (EPISODES_DIR / f"{ep.id}.json").unlink(missing_ok=True)
+            except Exception:
+                pass
+            self._episodes.pop(ep.id, None)
+            actual_removed += 1
+
+        return {"removed": actual_removed, "kept": len(self._episodes)}
 
     def retrieve(self, query: str, top_k: int = 5, min_score: float = 0.1) -> list[Episode]:
         scored = []
@@ -1084,6 +1137,40 @@ class IntelligenceEngine:
                 parts.append("## Relevant Knowledge\n" + skill_ctx)
 
         return "\n".join(parts)
+
+    def memory_dashboard(self) -> dict:
+        """Aggregate a snapshot of every memory layer for the /memory dashboard."""
+        sensory = self.sensory.stats()
+        episodic = self.episodic.stats()
+        semantic = self.semantic.stats()
+        rag = self.rag.stats()
+        working = {
+            "recent_messages": len(self.working.recent_messages),
+            "cached_files": len(self.working.file_contents),
+            "search_results": len(self.working.search_results),
+            "instructions": len(self.working.instructions),
+            "tool_outputs": len(self.working.tool_outputs),
+            "retrieved_data": len(self.working.retrieved_data),
+        }
+        experiences = {"total": len(self.experiences._experiences)}
+        kg = {"nodes": len(self.knowledge_graph.nodes)}
+        skills = {"total": len(getattr(self.knowledge, "_skills", {}))}
+        brain = {}
+        try:
+            brain = self.brain.stats()
+        except Exception:
+            pass
+        return {
+            "sensory": sensory,
+            "working": working,
+            "episodic": episodic,
+            "semantic": semantic,
+            "rag": rag,
+            "experiences": experiences,
+            "knowledge_graph": kg,
+            "skills": skills,
+            "brain": brain,
+        }
 
     def after_mission(self, client, model: str, request: str, tasks: list, edited_files: set[str]) -> None:
         """Knowledge evolution: Observe → Extract → Update → Rank → Store."""

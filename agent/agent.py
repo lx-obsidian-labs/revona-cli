@@ -653,12 +653,32 @@ def _update_documentation(client, model: str, request: str, mission: Mission) ->
 # Backward-compatible wrappers
 # ---------------------------------------------------------------------------
 
-def _build_chat_context(prompt: str, context_block: str = "") -> str:
+def _build_chat_context(prompt: str, context_block: str = "", memory=None) -> str:
     """Build enriched context for a chat message by combining intelligence context,
-    ranked files/symbols, and semantic search results."""
+    ranked files/symbols, semantic search results, and per-message RAG retrieval."""
     parts = []
     if context_block:
         parts.append(context_block)
+
+    if memory is not None:
+        try:
+            rag_ctx = memory.rag.context_block(query=prompt, max_chunks=4, chars_per_chunk=600)
+            if rag_ctx:
+                parts.append("## Retrieved from Vector Memory (RAG)\n" + rag_ctx)
+        except Exception:
+            pass
+        try:
+            epi_ctx = memory.episodic.context_block(query=prompt, max_episodes=2)
+            if epi_ctx:
+                parts.append(epi_ctx)
+        except Exception:
+            pass
+        try:
+            sem_ctx = memory.semantic.context_block(query=prompt, max_facts=6)
+            if sem_ctx:
+                parts.append(sem_ctx)
+        except Exception:
+            pass
 
     try:
         ranked = _context_ranker.rank_context(prompt)
@@ -729,7 +749,7 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
         )
         messages = [{"role": "system", "content": system_content}]
 
-    enriched = _build_chat_context(prompt, context_block)
+    enriched = _build_chat_context(prompt, context_block, memory)
     user_content = prompt
     if enriched and len(enriched) > len(prompt) + 50:
         user_content = f"{enriched}\n\n## User Request\n{prompt}"
