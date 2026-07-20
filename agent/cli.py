@@ -9,7 +9,7 @@ from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 from rich.markdown import Markdown
 
-from typing import Any
+from typing import Any, Callable
 
 from . import ensure_dirs, CONFIG_PATH, DEFAULT_MODEL, BASE_URL, APP_NAME, COMPANY, REVONA_ASCII, C_ACCENT, VERSION
 from .client import get_client
@@ -237,44 +237,50 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
         raise SystemExit(0)
 
     if verb == "/help":
-        console.print("""[bold]Slash commands:[/]
-  /change model <id>   Switch model mid-session
-  /models [keyword]    Browse cached models
-  /plan                Toggle plan mode (no tool execution)
-  /undo                Undo last assistant response
-  /redo                Redo previously undone response
-  /init                Index repo and cache models
-  /save                Save current model as default
-  /skills [keyword]    List/query available skills and blueprints
-  /brain               Show repository intelligence summary
-  /capabilities        Discover available system capabilities
-  /search <query>      Semantic search across the repository
-  /verify              Run verification pipeline
-  /recovery            Show recovery history
-  /mission             Show current mission status
-  /workers <request>   Run mission in parallel worker mode
-  /queue               Show mission queue
-  /workspace           List workspaces
-  /checkpoints         List checkpoints
-  /sessions            List saved sessions
-  /resume <id>         Resume a previous session
-  /history [n]         Show last N exchanges from current session
-  /refresh             Reload context from disk (memory, repo intel, experiences)
-  /context             Show what context is loaded for this session
+        console.print("""[bold bright_green]Chat & Session[/]
+  [bold]/help[/]                Show this help
+  [bold]/plan[/]                Toggle plan mode (no tool execution)
+  [bold]/undo[/]                Undo last response
+  [bold]/redo[/]                Redo undone response
+  [bold]/exit[/], [bold]/quit[/]         Exit session
 
-  [bold cyan]File Management:[/]
-  /tree [path] [depth] Show directory tree with sizes
-  /find <pattern>      Find files by glob pattern
-  /filestats [path]    Show file/directory statistics
-  /gitstatus           Show git status (modified, untracked, etc.)
-  /mv <src> <dst>      Move/rename a file
-  /cp <src> <dst>      Copy a file
-  /rm <path>           Delete a file or directory
-  /mkdir <path>        Create a directory
+[bold bright_blue]Model & Config[/]
+  [bold]/change model[/] [dim]<id>[/]     Switch model mid-session
+  [bold]/models[/] [dim][keyword][/]      Browse cached models
+  [bold]/save[/]                Save current model as default
+  [bold]/init[/]                Index repo and cache models
 
-  /help                This help
-  /exit, /quit         Exit
-  @file                Reference a file in your prompt""")
+[bold bright_cyan]Intelligence[/]
+  [bold]/brain[/]               Show repository intelligence summary
+  [bold]/search[/] [dim]<query>[/]      Semantic search across codebase
+  [bold]/capabilities[/]        Discover system capabilities
+  [bold]/skills[/] [dim][keyword][/]    List skills, blueprints, accelerators
+  [bold]/context[/]             Show loaded context stats
+  [bold]/refresh[/]             Reload context from disk
+
+[bold bright_magenta]Missions & Workers[/]
+  [bold]/mission[/]             Show current mission status
+  [bold]/workers[/] [dim]<request>[/]   Run parallel mission (4 workers)
+  [bold]/queue[/]               Show mission queue
+  [bold]/verify[/]              Run verification pipeline
+  [bold]/recovery[/]            Show recovery history
+
+[bold bright_yellow]Sessions[/]
+  [bold]/sessions[/]            List saved sessions
+  [bold]/resume[/] [dim]<id>[/]         Resume a previous session
+  [bold]/history[/] [dim][n][/]          Show last N exchanges
+
+[bold bright_white]File Management[/]
+  [bold]/tree[/] [dim][path] [depth][/]  Show directory tree with sizes
+  [bold]/find[/] [dim]<pattern>[/]      Find files by glob pattern
+  [bold]/filestats[/] [dim][path][/]    Show file/directory statistics
+  [bold]/gitstatus[/]           Show git status
+  [bold]/mv[/] [dim]<src> <dst>[/]      Move/rename a file
+  [bold]/cp[/] [dim]<src> <dst>[/]      Copy a file
+  [bold]/rm[/] [dim]<path>[/]           Delete a file (with confirmation)
+  [bold]/mkdir[/] [dim]<path>[/]        Create a directory
+
+  [dim]Tip: Use @filename to reference files in your prompt[/]""")
         return client, mdl, messages, history, redo_stack, plan_mode, True
 
     if verb == "/capabilities":
@@ -623,6 +629,20 @@ def _print_banner():
     console.print(f"[bold]{APP_NAME} v{VERSION}[/]  [dim]Autonomous AI Engineering OS[/]")
     console.print(f"[dim]Built by {COMPANY}[/]")
     console.print()
+
+    first_run_file = Path(".agent") / ".first_run_done"
+    if not first_run_file.exists():
+        try:
+            first_run_file.parent.mkdir(parents=True, exist_ok=True)
+            first_run_file.write_text("done", encoding="utf-8")
+        except Exception:
+            pass
+        console.print("[bold bright_green]Welcome to Revona![/] Here's how to get started:\n")
+        console.print("  [bold cyan]1.[/] Just type naturally — describe what you want to build")
+        console.print("  [bold cyan]2.[/] Type [bold]/help[/] to see all commands")
+        console.print("  [bold cyan]3.[/] Type [bold]/init[/] to index your repository")
+        console.print("  [bold cyan]4.[/] Use [bold]@filename[/] to reference files in your prompt\n")
+        console.print("  [dim]Example:[/] [italic]add user authentication with JWT to my Express API[/]\n")
 
 
 @click.group(invoke_without_command=True)

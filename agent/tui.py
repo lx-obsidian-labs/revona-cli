@@ -34,6 +34,16 @@ _RED = "bright_red"
 _MUTED = "bright_black"
 _WHITE = "white"
 
+_BORDER_HEADER = "bright_blue"
+_BORDER_MISSION = "bright_cyan"
+_BORDER_INPUT = "bright_green"
+_BORDER_FEED = "bright_yellow"
+_BORDER_AGENTS = "bright_magenta"
+_BORDER_HEALTH = "bright_red"
+_BORDER_STATS = "bright_white"
+_BORDER_FOOTER = "bright_black"
+_BORDER_ACCENT = "bright_blue"
+
 _ORB_FRAMES = itertools.cycle(["○", "◐", "◑", "◒"] if _U else ["o", "~", "=", "+"])
 
 _STATE_COLORS = {
@@ -329,10 +339,16 @@ else:
 
 
 _COMMANDS = [
-    "/workers", "/mission", "/plan", "/build", "/help", "/exit", "/quit",
-    "/change model", "/models", "/init", "/save", "/skills", "/brain",
-    "/capabilities", "/search", "/verify", "/recovery", "/queue",
-    "/workspace", "/checkpoints", "/undo", "/redo", "/plan",
+    "/help", "/exit", "/quit", "/q",
+    "/plan", "/undo", "/redo",
+    "/change model", "/models", "/save",
+    "/init", "/refresh", "/context", "/brain",
+    "/search", "/capabilities", "/skills",
+    "/mission", "/workers", "/queue", "/verify", "/recovery",
+    "/sessions", "/resume", "/history",
+    "/tree", "/find", "/filestats", "/gitstatus",
+    "/mv", "/cp", "/rm", "/mkdir",
+    "/workspace", "/checkpoints",
 ]
 
 
@@ -402,7 +418,7 @@ def _render_header(state: CockpitState) -> Panel:
         (" │ ", _BORDER),
         (orb.plain, _MUTED),
     )
-    return Panel(Group(left, right), style=_ACCENT, padding=(0, 0))
+    return Panel(Group(left, right), style=_BORDER_HEADER, padding=(0, 0))
 
 
 def _render_mission_bar(state: CockpitState) -> Panel:
@@ -423,7 +439,7 @@ def _render_mission_bar(state: CockpitState) -> Panel:
     )
     return Panel(
         Group(Text.assemble(left, right), bar),
-        border_style=_BORDER, padding=(0, 1),
+        border_style=_BORDER_MISSION, padding=(0, 1),
     )
 
 
@@ -434,7 +450,7 @@ def _render_input(state: CockpitState) -> Panel:
     lines = []
     lines.append(f" [bold bright_blue]>[/] {prompt}")
     lines.append("")
-    return Panel("\n".join(lines), title="INPUT", border_style=_BORDER)
+    return Panel("\n".join(lines), title="INPUT", border_style=_BORDER_INPUT)
 
 
 def _render_feed(state: CockpitState) -> Panel:
@@ -459,7 +475,7 @@ def _render_feed(state: CockpitState) -> Panel:
         lines.append(f" [{_CYAN}]▸[/] {state.streaming_text[-280:]}")
     if not lines:
         lines.append(f" [{_MUTED}]Awaiting activity...[/]")
-    return Panel("\n".join(lines), title="FEED", border_style=_BORDER)
+    return Panel("\n".join(lines), title="FEED", border_style=_BORDER_FEED)
 
 
 def _render_agents(state: CockpitState) -> Panel:
@@ -508,24 +524,26 @@ def _render_agents(state: CockpitState) -> Panel:
                 lines.append(f" [{color}]{icon}[/] {name} [{_MUTED}]{tag}[/]")
         else:
             lines.append(f" [{_MUTED}]No agents active[/]")
-    return Panel("\n".join(lines), title="AGENTS" if not state.parallel_mode else "WORKERS", border_style=_BORDER)
+    return Panel("\n".join(lines), title="AGENTS" if not state.parallel_mode else "WORKERS", border_style=_BORDER_AGENTS)
 
 
 def _render_health(state: CockpitState) -> Panel:
     lines = []
-    h = state.pulse.health
+    h = state.pulse.health * 100
     h_color = _GREEN if h > 70 else (_AMBER if h > 40 else _RED)
     lines.append(f"  [{h_color}]{h:.0f}%[/] Overall")
-    t = state.pulse.test_pass_rate
+    t = state.pulse.tests_passing
     t_color = _GREEN if t > 70 else (_AMBER if t > 40 else _RED)
     lines.append(f"  [{t_color}]{t:.0f}%[/] Tests")
-    b = state.pulse.build_success_rate
+    b = 100.0 if state.pulse.build == "PASS" else (0.0 if state.pulse.build == "FAIL" else 50.0)
     b_color = _GREEN if b > 70 else (_AMBER if b > 40 else _RED)
-    lines.append(f"  [{b_color}]{b:.0f}%[/] Build")
-    r = state.pulse.risk_score
+    b_label = state.pulse.build if state.pulse.build != "UNKNOWN" else "---"
+    lines.append(f"  [{b_color}]{b_label}[/] Build")
+    risk_map = {"Low": 20, "Medium": 50, "High": 80, "Unknown": 50}
+    r = risk_map.get(state.pulse.risk, 50)
     r_color = _GREEN if r < 30 else (_AMBER if r < 60 else _RED)
-    lines.append(f"  [{r_color}]{r:.0f}%[/] Risk")
-    return Panel("\n".join(lines), title="HEALTH", border_style=_BORDER)
+    lines.append(f"  [{r_color}]{state.pulse.risk}[/] Risk")
+    return Panel("\n".join(lines), title="HEALTH", border_style=_BORDER_HEALTH)
 
 
 def _render_stats(state: CockpitState) -> Panel:
@@ -554,7 +572,7 @@ def _render_stats(state: CockpitState) -> Panel:
         lines.append(f"  Memory:     [{_ACCENT}]{' · '.join(mem_parts)}[/]")
     if state.session_id:
         lines.append(f"  Session:    [{_MUTED}]{state.session_id}[/]")
-    return Panel("\n".join(lines), title="STATS", border_style=_BORDER)
+    return Panel("\n".join(lines), title="STATS", border_style=_BORDER_STATS)
 
 
 def _render_footer(state: CockpitState) -> Panel:
@@ -565,12 +583,32 @@ def _render_footer(state: CockpitState) -> Panel:
     if state.error_message:
         left = Text.assemble((state.error_message, f"bold {_RED}"))
     right = Text.assemble(
-        (" /menu", _MUTED),
+        (" /help", _MUTED),
         (" · ", _BORDER),
         ("q", _AMBER),
         (":quit ", _MUTED),
     )
-    return Panel(Group(left, right), border_style=_BORDER)
+    return Panel(Group(left, right), border_style=_BORDER_FOOTER)
+
+
+def _render_response(state: CockpitState) -> Panel:
+    lines = []
+    if state.messages:
+        for msg in state.messages[-4:]:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "assistant" and content:
+                wrapped = content[:500]
+                if len(content) > 500:
+                    wrapped += "..."
+                lines.append(f" [{_CYAN}]Agent:[/] {wrapped}")
+            elif role == "user":
+                lines.append(f" [{_GREEN}]You:[/] {content[:200]}")
+    if state.streaming_text:
+        lines.append(f" [{_CYAN}]▸[/] {state.streaming_text[-300:]}")
+    if not lines:
+        lines.append(f" [{_MUTED}]No responses yet — type a message below[/]")
+    return Panel("\n".join(lines), title="RESPONSE", border_style=_BORDER_ACCENT)
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +625,7 @@ def build_layout(state: CockpitState) -> Layout:
     middle = Layout()
     middle.split_row(
         Layout(renderable=_render_input(state), size=24),
+        Layout(renderable=_render_response(state)),
         Layout(renderable=_render_feed(state)),
         Layout(renderable=_render_agents(state), size=22),
     )
