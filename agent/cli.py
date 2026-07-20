@@ -138,8 +138,17 @@ def _start_interactive(model_override: str | None = None):
     _dbg("start_interactive: client ready")
     state_ref: dict[str, Any] = {"messages": None, "history": [], "redo_stack": [], "plan_mode": False, "session_id": new_session_id()}
 
-    session_context = _load_session_context()
-    _dbg("start_interactive: session context loaded")
+    # Load session context in the BACKGROUND so the prompt/cockpit appears
+    # instantly. _intel.load_all() can be very slow (filesystem scans over large
+    # repos), and must never block startup.
+    session_ctx: dict[str, str] = {"value": ""}
+    def _bg_load_ctx() -> None:
+        try:
+            session_ctx["value"] = _load_session_context()
+        except Exception:
+            session_ctx["value"] = ""
+    _dbg("start_interactive: launching background context load")
+    threading.Thread(target=_bg_load_ctx, daemon=True).start()
 
     watcher = None
     try:
@@ -151,7 +160,7 @@ def _start_interactive(model_override: str | None = None):
         _dbg("start_interactive: watcher failed")
     _dbg("start_interactive: calling run_cockpit")
     def _handle(state, text: str):
-        nonlocal client, mdl, session_context
+        nonlocal client, mdl, session_ctx
 
         if text.startswith("/"):
             try:
@@ -171,7 +180,7 @@ def _start_interactive(model_override: str | None = None):
                 state.add_timeline(f"Handled: {text}")
                 cmd_name = text.strip().split()[0].lower() if text.strip() else ""
                 if cmd_name in ("/init", "/brain", "/skills"):
-                    session_context = _load_session_context()
+                    session_ctx["value"] = _load_session_context()
                     state.add_timeline("Context refreshed")
                 return
         else:
@@ -198,7 +207,7 @@ def _start_interactive(model_override: str | None = None):
         state.add_timeline("Analysing request")
 
         try:
-            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state, context_block=session_context, memory=_intel)
+            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state, context_block=session_ctx["value"], memory=_intel)
             state_ref["messages"] = messages
             if messages:
                 content = messages[-1].get("content", "")

@@ -45,7 +45,6 @@ class RepositoryWatcher:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self._take_snapshot()
         self._stop.clear()
         self._thread = Thread(target=self._run, daemon=True, name="repo-watcher")
         self._thread.start()
@@ -75,6 +74,12 @@ class RepositoryWatcher:
                     pass
 
     def _run(self) -> None:
+        # Take the initial snapshot INSIDE the background thread so startup is
+        # never blocked by a full-repo filesystem scan.
+        try:
+            self._take_snapshot()
+        except Exception:
+            pass
         while not self._stop.is_set():
             time.sleep(self.interval)
             try:
