@@ -814,42 +814,38 @@ def run_cockpit(
     if initial_messages:
         state.messages = initial_messages
 
-    input_queue: queue.Queue = queue.Queue()
-    stop_event = threading.Event()
-
-    input_thread = threading.Thread(
-        target=_input_worker, args=(input_queue, state, stop_event), daemon=True
-    )
-    input_thread.start()
+    def _render() -> None:
+        try:
+            live.update(build_layout(state))
+        except Exception:
+            pass
 
     try:
         with Live(build_layout(state), console=console, refresh_per_second=1 / refresh_rate, screen=False) as live:
-            frame = 0
-            while not stop_event.is_set():
+            while True:
+                stripped = ""
                 try:
-                    raw = input_queue.get_nowait()
-                    line, is_exit = raw if isinstance(raw, tuple) else (raw, False)
-                except queue.Empty:
-                    if frame % 3 == 0:
-                        live.update(build_layout(state))
-                    frame += 1
-                    time.sleep(refresh_rate / 3)
-                    continue
+                    live.stop()
+                    try:
+                        line = console.input("[bold bright_green]> [/]")
+                    finally:
+                        try:
+                            live.start()
+                        except Exception:
+                            pass
+                except (EOFError, KeyboardInterrupt):
+                    break
 
                 stripped = line.strip()
-
                 if not stripped:
-                    state.input_text = ""
-                    live.update(build_layout(state))
                     continue
+                if stripped.lower() in ("exit", "quit", "q"):
+                    state.status_message = "SHUTTING DOWN"
+                    _render()
+                    time.sleep(0.2)
+                    break
 
                 state.input_text = line
-
-                if is_exit or stripped.lower() in ("exit", "quit", "q"):
-                    state.status_message = "SHUTTING DOWN"
-                    live.update(build_layout(state))
-                    time.sleep(0.3)
-                    break
 
                 if stripped.startswith("/"):
                     cmd = stripped.split()[0].lower()
@@ -857,9 +853,9 @@ def run_cockpit(
                         break
                     state.command_mode = True
                     state.add_message("user", line)
-                    state.status_message = f"CMD: {line.split(chr(10))[0][:60]}"
+                    state.status_message = f"CMD: {stripped[:60]}"
                     _ORB.set_state("planning", "Processing")
-                    live.update(build_layout(state))
+                    _render()
                     try:
                         on_message(state, line)
                     except Exception as e:
@@ -870,7 +866,7 @@ def run_cockpit(
                     state.status_message = "READY"
                     _ORB.set_state("idle")
                     state.input_text = ""
-                    live.update(build_layout(state))
+                    _render()
                     continue
 
                 state.add_message("user", line)
@@ -878,7 +874,7 @@ def run_cockpit(
                 _ORB.set_state("thinking", label="Thinking")
                 state.input_text = ""
                 state.add_timeline(f"Processing: {line[:60]}")
-                live.update(build_layout(state))
+                _render()
 
                 try:
                     on_message(state, line)
@@ -889,12 +885,16 @@ def run_cockpit(
 
                 state.status_message = "READY"
                 _ORB.set_state("idle")
-                live.update(build_layout(state))
-
-    except KeyboardInterrupt:
-        pass
+                _render()
+    except Exception as e:
+        console.print(f"[yellow]TUI unavailable ({type(e).__name__}: {e}). Using simple mode.[/]")
+        try:
+            _simple_fallback(model, on_message, initial_messages)
+        except Exception as e2:
+            console.print(f"[red]Simple mode also failed: {e2}[/]")
+            _basic_fallback(model, on_message, initial_messages)
+        return
     finally:
-        stop_event.set()
         console.print("[dim]Session ended.[/]")
 
 
