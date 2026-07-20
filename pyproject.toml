@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "revona"
-version = "2.2.1"
+version = "2.2.2"
 description = "Autonomous Software Engineering Operating System — built by LX Obsidian Labs"
 requires-python = ">=3.11"
 license = "MIT"
@@ -28,6 +28,13 @@ dependencies = [
     "rich>=13.0",
     "requests>=2.31",
 ]
+
+[project.optional-dependencies]
+# Advanced memory / RAG / agentic capabilities (optional).
+vectors = ["chromadb>=0.5", "sentence-transformers>=2.5"]
+frameworks = ["langchain>=0.2", "langgraph>=0.2", "llama-index>=0.10"]
+autonomy = ["chromadb>=0.5", "langchain>=0.2", "langgraph>=0.2", "llama-index>=0.10"]
+all = ["chromadb>=0.5", "sentence-transformers>=2.5", "langchain>=0.2", "langgraph>=0.2", "llama-index>=0.10"]
 
 [project.urls]
 Homepage = "https://github.com/lx-obsidian-labs/revona-cli"

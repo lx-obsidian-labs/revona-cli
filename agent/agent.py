@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from rich.markdown import Markdown
@@ -62,11 +64,16 @@ def _run_agent_loop(
     allowed_tools: list[dict],
     max_iter: int = 30,
     on_tool: Callable | None = None,
-) -> tuple[str, list[dict]]:
+    tui_state=None,
+    memory=None,
+) -> tuple[str, list[dict], dict]:
     messages = [{"role": "system", "content": system_prompt}]
     messages.append({"role": "user", "content": user_prompt})
     files_read: set[str] = set()
     files_modified: set[str] = set()
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_tokens = 0
 
     for i in range(max_iter):
         try:
@@ -80,9 +87,19 @@ def _run_agent_loop(
         except Exception as e:
             error_msg = f"LLM API error ({type(e).__name__}): {str(e)[:200]}"
             console.print(f"[red]{error_msg}[/]")
-            return error_msg, messages
+            return error_msg, messages, {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens, "total_tokens": total_tokens}
 
         msg = resp.choices[0].message
+
+        if resp.usage:
+            total_prompt_tokens += resp.usage.prompt_tokens or 0
+            total_completion_tokens += resp.usage.completion_tokens or 0
+            total_tokens += resp.usage.total_tokens or 0
+            if tui_state:
+                tui_state.tokens_used = total_tokens
+                tui_state.prompt_tokens = total_prompt_tokens
+                tui_state.completion_tokens = total_completion_tokens
+                tui_state.context_percent = min(100.0, (total_tokens / 128000) * 100)
 
         if msg.tool_calls:
             messages.append({
@@ -97,17 +114,26 @@ def _run_agent_loop(
                     for tc in msg.tool_calls
                 ],
             })
+
+            tool_args_list = []
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-
                 fn_name = tc.function.name
                 fp = args.get("path", args.get("file", ""))
 
                 if fn_name == "read_file" and fp:
                     files_read.add(str(Path(fp)))
+                    if memory is not None:
+                        try:
+                            content = Path(fp).read_text(encoding="utf-8", errors="replace")
+                            memory.rag.index_text(content, str(fp), "file", {"size": len(content)})
+                            memory.sensory.perceive_file(str(fp), content[:4000])
+                            memory.working.cache_file(str(fp), content[:8000])
+                        except Exception:
+                            pass
 
                 if fn_name in ("write_file", "edit_file") and fp:
                     fpath = str(Path(fp))
@@ -125,14 +151,37 @@ def _run_agent_loop(
 
                 if on_tool:
                     on_tool(fn_name, args)
+                tool_args_list.append((tc, fn_name, args, fp))
+
+            def _exec_one(item):
+                tc, fn_name, args, fp = item
+                t0 = time.time()
                 try:
                     result = execute_tool(fn_name, args)
                 except Exception as e:
                     result = f"Tool error ({fn_name}): {e}"
+                ms = (time.time() - t0) * 1000
+                return tc, fn_name, args, fp, result, ms
+
+            max_workers = min(len(tool_args_list), 6)
+            results_map = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(_exec_one, item): item for item in tool_args_list}
+                for future in as_completed(futures):
+                    tc, fn_name, args, fp, result, ms = future.result()
+                    results_map[tc.id] = (tc, fn_name, args, fp, result, ms)
+
+            for tc in msg.tool_calls:
+                tc_id, fn_name, args, fp, result, ms = results_map[tc.id]
+                is_error = str(result).startswith("ERROR") or str(result).startswith("Tool error")
+                console.print(f"[dim]  {'\\u2717' if is_error else '\\u2713'} {fn_name}({ms:.0f}ms)[/]")
+
+                if tui_state:
+                    tui_state.log_tool_call(fn_name, args, str(result)[:200], ms)
 
                 content = str(result)[:_TOOL_RESULT_LIMIT]
                 if len(str(result)) > _TOOL_RESULT_LIMIT:
-                    content += f"\n... (truncated, total {len(str(result))} chars)"
+                    content += f"\n... (truncated, total {len(str(result))} chars). Tip: use grep or a more specific path to narrow results."
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -170,9 +219,11 @@ def _run_agent_loop(
 
         final = msg.content or ""
         messages.append({"role": "assistant", "content": final})
-        return final, messages
+        token_info = {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens, "total_tokens": total_tokens}
+        return final, messages, token_info
 
-    return "(max iterations reached)", messages
+    token_info = {"prompt_tokens": total_prompt_tokens, "completion_tokens": total_completion_tokens, "total_tokens": total_tokens}
+    return "(max iterations reached)", messages, token_info
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +464,7 @@ def _generate_architecture(
         "Output a clear architecture document."
     )
 
-    text, _ = _run_agent_loop(client, model, system, prompt, resolve_tools(["read_file", "list_files", "grep_files"]), max_iter=5)
+    text, _, _ = _run_agent_loop(client, model, system, prompt, resolve_tools(["read_file", "list_files", "grep_files"]), max_iter=5)
     return text
 
 
@@ -437,7 +488,7 @@ def _generate_plan(
         "- A 'Risks' section"
     )
 
-    text, _ = _run_agent_loop(client, model, system, prompt, resolve_tools(["read_file", "list_files", "grep_files"]), max_iter=5)
+    text, _, _ = _run_agent_loop(client, model, system, prompt, resolve_tools(["read_file", "list_files", "grep_files"]), max_iter=5)
     return text
 
 
@@ -485,7 +536,7 @@ def _execute_plan(client, model: str, request: str, plan_text: str, mission: Mis
                     error_counts.clear()
                     break
 
-    final_text, _ = _run_agent_loop(
+    final_text, _, _ = _run_agent_loop(
         client, model, system,
         f"## Plan\n{plan_text}\n\n## Request\n{request}",
         tools, max_iter=50, on_tool=_on_tool_with_learning,
@@ -512,7 +563,7 @@ def _attempt_recovery(client, model: str, verifier: VerificationPipeline, missio
                         f"## Recovery Strategy\n{strategy.action}\n\nFix the issue."
                     )
                     try:
-                        _, _ = _run_agent_loop(
+                        _, _, _ = _run_agent_loop(
                             client, model,
                             builder.system_prompt,
                             fix_prompt,
@@ -558,7 +609,7 @@ def _security_review(client, model: str, mission: Mission) -> tuple[bool, str]:
         + "\nIf issues found, list them with file:line references and severity."
     )
 
-    text, _ = _run_agent_loop(
+    text, _, _ = _run_agent_loop(
         client, model, security.system_prompt, prompt,
         resolve_tools(security.allowed_tools), max_iter=10,
     )
@@ -654,8 +705,13 @@ def _build_chat_context(prompt: str, context_block: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def run_agent(client, model: str, prompt: str, messages: list | None = None, max_iter: int = 30, tui_state=None, context_block: str = "") -> list:
+def run_agent(client, model: str, prompt: str, messages: list | None = None, max_iter: int = 30, tui_state=None, context_block: str = "", memory=None) -> list:
     """Simple chat loop (backward compatible)."""
+    if tui_state and memory is not None:
+        try:
+            tui_state.vector_chunks = len(memory.rag._chunks)
+        except Exception:
+            pass
     agent_spec = get_agent("builder")
     from .prompts import SYSTEM_PROMPT
     system = agent_spec.system_prompt if agent_spec else SYSTEM_PROMPT
@@ -710,6 +766,12 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
             console.print(f"[red]{error_msg}[/]")
             return messages
 
+        if resp.usage and tui_state:
+            tui_state.prompt_tokens += resp.usage.prompt_tokens or 0
+            tui_state.completion_tokens += resp.usage.completion_tokens or 0
+            tui_state.tokens_used = tui_state.prompt_tokens + tui_state.completion_tokens
+            tui_state.context_percent = min(100.0, (tui_state.tokens_used / 128000) * 100)
+
         msg = resp.choices[0].message
 
         if msg.tool_calls:
@@ -721,6 +783,8 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
                     for tc in msg.tool_calls
                 ],
             })
+
+            tool_args_list = []
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments or "{}")
@@ -729,14 +793,21 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
                 fn_name = tc.function.name
                 fp = args.get("path", args.get("file", ""))
 
-                detail = f"> {fn_name}({json.dumps(args)[:200]})"
                 if tui_state:
-                    tui_state.add_activity(detail)
+                    tui_state.add_activity(f"> {fn_name}({json.dumps(args)[:200]})")
                 else:
-                    console.print(f"[dim]{detail}[/]")
+                    console.print(f"[dim]> {fn_name}({json.dumps(args)[:200]})[/]")
 
                 if fn_name == "read_file" and fp:
                     files_read.add(str(Path(fp)))
+                    if memory is not None:
+                        try:
+                            content = Path(fp).read_text(encoding="utf-8", errors="replace")
+                            memory.rag.index_text(content, str(fp), "file", {"size": len(content)})
+                            memory.sensory.perceive_file(str(fp), content[:4000])
+                            memory.working.cache_file(str(fp), content[:8000])
+                        except Exception:
+                            pass
 
                 if fn_name in ("write_file", "edit_file") and fp:
                     fpath = str(Path(fp))
@@ -752,27 +823,44 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
                         })
                         if tui_state:
                             tui_state.add_diagnostic(f"WARN: read before write: {fp}")
-                        else:
-                            console.print(f"[yellow]{warning}[/]")
                     files_modified.add(fpath)
                     try:
                         _intel.working.observe(f"Modified: {fp}")
                     except Exception:
                         pass
+                tool_args_list.append((tc, fn_name, args, fp))
 
+            def _exec_one_run(item):
+                tc, fn_name, args, fp = item
+                t0 = time.time()
                 try:
                     result = execute_tool(fn_name, args)
                 except Exception as e:
                     result = f"Tool error: {e}"
+                ms = (time.time() - t0) * 1000
+                return tc, fn_name, args, fp, result, ms
+
+            max_workers = min(len(tool_args_list), 6)
+            results_map = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(_exec_one_run, item): item for item in tool_args_list}
+                for future in as_completed(futures):
+                    tc, fn_name, args, fp, result, ms = future.result()
+                    results_map[tc.id] = (tc, fn_name, args, fp, result, ms)
+
+            for tc in msg.tool_calls:
+                tc_id, fn_name, args, fp, result, ms = results_map[tc.id]
+                is_error = str(result).startswith("ERROR") or str(result).startswith("Tool error")
+                if is_error:
                     error_count += 1
                     try:
                         record = _recovery.record_failure(
-                            error_message=str(e),
+                            error_message=str(result),
                             context=f"Tool: {fn_name}, args: {json.dumps(args)[:200]}",
                         )
                         strategies = _recovery.suggest_strategies(record)
                         if strategies:
-                            hint = f"Recovery suggestion: {strategies[0].name} — {strategies[0].description}"
+                            hint = f"Recovery suggestion: {strategies[0].name} - {strategies[0].description}"
                             result += f"\n{hint}"
                             if tui_state:
                                 tui_state.add_diagnostic(hint)
@@ -781,8 +869,23 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
 
                 content = str(result)[:_TOOL_RESULT_LIMIT]
                 if len(str(result)) > _TOOL_RESULT_LIMIT:
-                    content += f"\n... (truncated, total {len(str(result))} chars)"
+                    content += f"\n... (truncated, total {len(str(result))} chars). Tip: use grep or a more specific path to narrow results."
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
+
+                if memory is not None:
+                    try:
+                        memory.working.record_tool_output(fn_name, args, content, success=not is_error)
+                        if is_error:
+                            memory.working.current_errors.append(f"{fn_name}: {result[:200]}")
+                        if fn_name == "grep_files" and "pattern" in args:
+                            memory.working.record_search(args["pattern"], [r for r in str(result).split("\n") if r.strip()][:10])
+                        if fn_name in ("web_fetch", "api_call"):
+                            memory.working.record_retrieved(str(args.get("url", args.get("endpoint", "?"))), fn_name, str(result)[:2000])
+                    except Exception:
+                        pass
+
+                if tui_state:
+                    tui_state.log_tool_call(fn_name, args, content, ms)
 
                 if fn_name in ("write_file", "edit_file") and fp and tools:
                     has_read = any(

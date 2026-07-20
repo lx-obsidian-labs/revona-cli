@@ -205,7 +205,11 @@ class CockpitState:
         self.streaming_text: str = ""
         self.model: str = ""
         self.tokens_used: int = 0
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
         self.context_percent: float = 0.0
+        self.context_max: int = 128000
+        self.vector_chunks: int = 0
         self.input_text: str = ""
         self.command_mode: bool = False
         self.status_message: str = "READY"
@@ -367,6 +371,8 @@ _COMMANDS = [
     "/tree", "/find", "/filestats", "/gitstatus",
     "/mv", "/cp", "/rm", "/mkdir",
     "/workspace", "/checkpoints",
+    "/lats", "/subagents", "/selfmodify", "/iceberg",
+    "/vectors", "/episodes", "/semantic", "/sensory", "/guardrails",
 ]
 
 
@@ -595,10 +601,20 @@ def _render_health(state: CockpitState) -> Panel:
 
 def _render_stats(state: CockpitState) -> Panel:
     lines = []
+    # Token usage with visual bar
     lines.append(f"  Tokens:     [{_ACCENT}]{state.tokens_used:,}[/]")
+    if state.prompt_tokens or state.completion_tokens:
+        lines.append(f"    in:{state.prompt_tokens:,} out:{state.completion_tokens:,}")
+    # Context window usage bar
     ctx = state.context_percent
-    ctx_color = _GREEN if ctx > 70 else (_AMBER if ctx > 40 else _RED)
-    lines.append(f"  Context:    [{ctx_color}]{ctx:.0f}%[/]")
+    bar_len = 14
+    filled = int(ctx / 100 * bar_len)
+    bar = "\u2588" * filled + "\u2591" * (bar_len - filled)
+    ctx_color = _GREEN if ctx <= 70 else (_AMBER if ctx <= 85 else _RED)
+    lines.append(f"  Context:    [{ctx_color}]{bar}[/] {ctx:.0f}%")
+    if ctx > 85:
+        lines.append(f"    [{_RED}]! near limit ({state.context_max:,})[/]")
+    # Confidence
     avg = state.confidence.average() * 100
     c_color = _GREEN if avg > 70 else (_AMBER if avg > 40 else _RED)
     lines.append(f"  Confidence: [{c_color}]{avg:.0f}%[/]")
@@ -617,6 +633,8 @@ def _render_stats(state: CockpitState) -> Panel:
         mem_parts.append(f"{state.memory_kg_nodes} kg")
     if mem_parts:
         lines.append(f"  Memory:     [{_ACCENT}]{' · '.join(mem_parts)}[/]")
+    if state.vector_chunks > 0:
+        lines.append(f"  Vectors:    [{_ACCENT}]{state.vector_chunks:,}[/]")
     if state.session_id:
         lines.append(f"  Session:    [{_MUTED}]{state.session_id}[/]")
     return Panel("\n".join(lines), title="STATS", border_style=_BORDER_STATS)

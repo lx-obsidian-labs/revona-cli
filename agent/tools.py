@@ -22,11 +22,11 @@ def _safe_shell(cmd: str) -> bool:
 def read_file(path: str) -> str:
     p = Path(path)
     if not p.exists():
-        return f"ERROR: file not found: {path}"
+        return f"ERROR: file not found: {path}\nHint: use list_files or find_files to locate the file."
     try:
         return p.read_text(encoding="utf-8", errors="ignore")
     except Exception as e:
-        return f"ERROR reading {path}: {e}"
+        return f"ERROR reading {path}: {e}\nHint: the file may be binary or have a permission issue."
 
 
 def write_file(path: str, content: str) -> str:
@@ -39,11 +39,11 @@ def write_file(path: str, content: str) -> str:
 def edit_file(path: str, old: str, new: str) -> str:
     p = Path(path)
     if not p.exists():
-        return f"ERROR: file not found: {path}"
+        return f"ERROR: file not found: {path}\nHint: use read_file first to check the path."
     text = p.read_text(encoding="utf-8", errors="ignore")
     if old not in text:
         lines = text.splitlines()
-        close = difflib.get_close_matches(old.strip(), lines, n=3, cutoff=0.5)
+        close = difflib.get_close_matches(old.strip(), lines, n=3, cutoff=0.6)
         hint = ""
         if close:
             hint = "\nClose matches found:\n" + "\n".join(f"  > {l.strip()}" for l in close)
@@ -55,10 +55,12 @@ def edit_file(path: str, old: str, new: str) -> str:
         ctx_hint = ""
         if ctx_lines:
             ctx_hint = "\nRelevant lines in file:\n" + "\n".join(ctx_lines[:5])
-        return f"ERROR: old string not found in {path}.{hint}{ctx_hint}\nRead the file first with read_file to get the exact text."
+        return f"ERROR: old string not found in {path}.{hint}{ctx_hint}\nTip: read_file the path first to get the exact text to replace."
     text = text.replace(old, new, 1)
     p.write_text(text, encoding="utf-8")
-    return f"Edited {path} ({len(old)} -> {len(new)} chars)"
+    preview_old = old.strip()[:60].replace("\n", "\\n")
+    preview_new = new.strip()[:60].replace("\n", "\\n")
+    return f"Edited {path}\n  old: \"{preview_old}\"\n  new: \"{preview_new}\""
 
 
 def list_files(path: str = ".") -> str:
@@ -107,10 +109,10 @@ def grep_files(pattern: str, path: str = ".") -> str:
     file_count = len(matched_files)
     result = "\n".join(out[:200])
     if not result:
-        return f"No matches for '{pattern}'."
+        return f"No matches for '{pattern}' in {path}.\nHint: try a broader pattern or check the path."
     summary = f"Found {len(out)} matches in {file_count} files."
     if len(out) > 200:
-        summary += f" (showing first 200 of {len(out)})"
+        summary += f" (showing first 200 of {len(out)})\nTip: narrow results with grep_files(pattern, path='specific/dir')"
     return f"{summary}\n{result}"
 
 
@@ -139,15 +141,15 @@ def move_file(source: str, destination: str) -> str:
     src = Path(source)
     dst = Path(destination)
     if not src.exists():
-        return f"ERROR: source not found: {source}"
+        return f"ERROR: source not found: {source}\nHint: use list_files to check the path."
     if dst.exists():
-        return f"ERROR: destination already exists: {destination}"
+        return f"ERROR: destination already exists: {destination}\nHint: delete it first with delete_file, or choose a different name."
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         src.rename(dst)
         return f"Moved {source} -> {destination}"
     except Exception as e:
-        return f"ERROR moving {source}: {e}"
+        return f"ERROR moving {source}: {e}\nHint: check permissions and that both paths are on the same disk."
 
 
 def copy_file(source: str, destination: str) -> str:
@@ -155,9 +157,9 @@ def copy_file(source: str, destination: str) -> str:
     src = Path(source)
     dst = Path(destination)
     if not src.exists():
-        return f"ERROR: source not found: {source}"
+        return f"ERROR: source not found: {source}\nHint: use list_files to check the path."
     if dst.exists():
-        return f"ERROR: destination already exists: {destination}"
+        return f"ERROR: destination already exists: {destination}\nHint: delete it first with delete_file, or choose a different name."
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
@@ -173,7 +175,7 @@ def copy_file(source: str, destination: str) -> str:
 def delete_file(path: str) -> str:
     p = Path(path)
     if not p.exists():
-        return f"ERROR: not found: {path}"
+        return f"ERROR: not found: {path}\nHint: use list_files or find_files to locate it."
     try:
         if p.is_dir():
             import shutil
@@ -212,11 +214,10 @@ def _tree_build(current: Path, lines: list, prefix: str, max_depth: int, current
     except PermissionError:
         return
     entries = [e for e in entries if not e.name.startswith(".") or e.name == ".gitignore"]
+    entries = [e for e in entries if e.name not in ("__pycache__", "node_modules", ".git")]
     for i, entry in enumerate(entries):
-        if entry.name.startswith("__pycache__") or entry.name == "node_modules":
-            continue
         is_last = i == len(entries) - 1
-        connector = "\\--- " if is_last else "|--- "
+        connector = "\\-- " if is_last else "|-- "
         if entry.is_dir():
             lines.append(f"{prefix}{connector}{entry.name}/")
             extension = "    " if is_last else "|   "
@@ -328,19 +329,29 @@ def git_status(path: str = ".") -> str:
 
 def run_shell(command: str, cwd: str = ".") -> str:
     if not _safe_shell(command):
+        build_tools = "npm, pnpm, yarn, cargo, make"
+        runtimes = "node, python, python3"
+        tests = "pytest"
+        linters = "ruff, black, mypy, tsc, eslint, prettier"
+        vcs = "git status, git diff, git log"
         return (
-            f"BLOCKED: '{command}' is not in the shell allowlist. "
-            "Allowed prefixes: " + ", ".join(SHELL_ALLOWLIST)
+            f"BLOCKED: '{command}' is not allowed.\n"
+            f"Allowed: build ({build_tools}), runtimes ({runtimes}), "
+            f"tests ({tests}), lint ({linters}), vcs ({vcs})"
         )
     try:
         r = subprocess.run(
             command, shell=True, cwd=cwd, capture_output=True,
             text=True, timeout=300,
         )
-        body = (r.stdout or "") + (r.stderr or "")
-        return f"exit={r.returncode}\n{body[:8000]}"
+        if r.returncode != 0 and r.stderr:
+            body = r.stderr[-4000:] + "\n" + (r.stdout or "")[-4000:]
+        else:
+            body = (r.stdout or "") + (r.stderr or "")
+        status = "✓" if r.returncode == 0 else "✗"
+        return f"{status} exit={r.returncode}\n{body[:8000]}"
     except subprocess.TimeoutExpired:
-        return "ERROR: command timed out (300s)."
+        return "ERROR: command timed out (300s).\nHint: break the command into smaller steps, or check for infinite loops."
     except Exception as e:
         return f"ERROR: {e}"
 
@@ -349,6 +360,12 @@ def web_fetch(url: str) -> str:
     try:
         r = requests.get(url, timeout=20, headers={"User-Agent": "revona"})
         return r.text[:8000]
+    except requests.exceptions.ConnectionError:
+        return f"ERROR: could not connect to {url}\nHint: check the URL and your network connection."
+    except requests.exceptions.Timeout:
+        return f"ERROR: request timed out for {url}\nHint: the site may be slow or down."
+    except requests.exceptions.HTTPError as e:
+        return f"ERROR: server returned {e.response.status_code} for {url}"
     except Exception as e:
         return f"ERROR fetching {url}: {e}"
 

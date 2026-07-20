@@ -155,7 +155,7 @@ def _start_interactive(model_override: str | None = None):
         state.add_timeline("Analysing request")
 
         try:
-            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state, context_block=session_context)
+            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state, context_block=session_context, memory=_intel)
             state_ref["messages"] = messages
             if messages:
                 content = messages[-1].get("content", "")
@@ -270,7 +270,7 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
   [bold]/resume[/] [dim]<id>[/]         Resume a previous session
   [bold]/history[/] [dim][n][/]          Show last N exchanges
 
-[bold bright_white]File Management[/]
+ [bold bright_white]File Management[/]
   [bold]/tree[/] [dim][path] [depth][/]  Show directory tree with sizes
   [bold]/find[/] [dim]<pattern>[/]      Find files by glob pattern
   [bold]/filestats[/] [dim][path][/]    Show file/directory statistics
@@ -279,6 +279,17 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
   [bold]/cp[/] [dim]<src> <dst>[/]      Copy a file
   [bold]/rm[/] [dim]<path>[/]           Delete a file (with confirmation)
   [bold]/mkdir[/] [dim]<path>[/]        Create a directory
+
+ [bold bright_red]Autonomy & Memory[/]
+  [bold]/lats[/] [dim]<goal>[/]          Run LATS tree-search planning
+  [bold]/subagents[/] [dim]<goal>[/]     Decompose goal into parallel sub-agents
+  [bold]/selfmodify[/] [dim]<reason>[/]  Let agent rewrite its own prompt (audited)
+  [bold]/iceberg[/] [dim]<text>[/]       Summarize using iceberg technique
+  [bold]/vectors[/] [dim][reindex][/]    Show/refresh Chroma vector index
+  [bold]/episodes[/] [dim][n][/]         Show past episodic memories
+  [bold]/semantic[/] [dim][query][/]     Query semantic memory (prefs/facts/rules)
+  [bold]/sensory[/]             Show sensory memory buffer
+  [bold]/guardrails[/]          Show active safety guardrails & limits
 
   [dim]Tip: Use @filename to reference files in your prompt[/]""")
         return client, mdl, messages, history, redo_stack, plan_mode, True
@@ -615,6 +626,151 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
         console.print(f"[green]Saved [bold]{mdl}[/] as default.[/]")
         return client, mdl, messages, history, redo_stack, plan_mode, True
 
+    if verb == "/lats":
+        goal = " ".join(parts[1:])
+        if not goal:
+            console.print("[yellow]Usage: /lats <goal>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        from .autonomy import LATSSearch
+        from .prompts import SYSTEM_PROMPT
+        console.print(f"[cyan]Running LATS tree search for:[/] {goal}")
+        lats = LATSSearch(client, mdl, SYSTEM_PROMPT)
+        best = lats.search(goal, on_progress=lambda it, v: console.print(f"  iter {it}: best={v:.2f}"))
+        path = lats.best_path(best)
+        console.print(f"[green]Best plan ({best.value:.2f}):[/]")
+        for i, n in enumerate(path):
+            console.print(f"  {i}. {n.thought[:120]}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/subagents":
+        goal = " ".join(parts[1:])
+        if not goal:
+            console.print("[yellow]Usage: /subagents <goal>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        from .autonomy import SubAgentOrchestrator
+        from .prompts import SYSTEM_PROMPT
+        console.print(f"[cyan]Spawning sub-agents for:[/] {goal}")
+        orch = SubAgentOrchestrator(client, mdl)
+        tasks = orch.run(goal, base_system=SYSTEM_PROMPT,
+                         on_progress=lambda d, t: console.print(f"  {d}/{t} done"))
+        for t in tasks:
+            console.print(f"  [{('green' if t.status == 'done' else 'red')}]{t.status}[/] {t.description[:80]}")
+        agg = orch.aggregate(tasks)
+        console.print(Panel(agg[:3000], title="Sub-Agent Results", border_style="magenta"))
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/selfmodify":
+        reason = " ".join(parts[1:]) or "user-initiated self-improvement"
+        from .autonomy import SelfModifyingAgent
+        from .prompts import SYSTEM_PROMPT
+        sma = SelfModifyingAgent()
+        sma.set_prompt(SYSTEM_PROMPT)
+        console.print(f"[cyan]Self-modification request:[/] {reason}")
+        console.print("[yellow]Generating improved prompt via LLM (audited, max 3/session)...[/]")
+        try:
+            resp = client.chat.completions.create(
+                model=mdl,
+                messages=[
+                    {"role": "system", "content": "You improve system prompts for coding agents. Reply with the improved prompt only."},
+                    {"role": "user", "content": f"Current prompt:\n{SYSTEM_PROMPT}\n\nImprove it for: {reason}\n\nReturn only the new prompt text."},
+                ],
+                stream=False, temperature=0.3,
+            )
+            new_prompt = resp.choices[0].message.content or SYSTEM_PROMPT
+            ok = sma.propose_modification(reason, new_prompt)
+            if ok:
+                console.print(f"[green]Self-modification approved & audited.[/] New prompt length: {len(new_prompt)} chars")
+                console.print(f"[dim]Audit log: .agent/self_modify_audit.json[/]")
+            else:
+                console.print("[red]Self-modification blocked by guardrails.[/]")
+        except Exception as e:
+            console.print(f"[red]Self-modify failed: {e}[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/iceberg":
+        text = " ".join(parts[1:])
+        if not text:
+            console.print("[yellow]Usage: /iceberg <text or @file>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        text = _expand_at_refs(text)
+        from .autonomy import Iceberg
+        ib = Iceberg()
+        try:
+            resp = client.chat.completions.create(
+                model=mdl,
+                messages=[
+                    {"role": "system", "content": "Summarize text into a 1-2 sentence 'tip of the iceberg' surface summary, then provide detailed 'depth' sections: ANALYSIS, KEY_POINTS (bullet list), and ACTION_ITEMS (bullet list). Use those exact headers."},
+                    {"role": "user", "content": text[:6000]},
+                ],
+                stream=False, temperature=0.2,
+            )
+            raw = resp.choices[0].message.content or ""
+            lines = raw.split("\n")
+            surface = lines[0][:400]
+            ib.set_surface(surface)
+            if "ANALYSIS" in raw:
+                ib.add_depth("analysis", raw.split("ANALYSIS", 1)[1].split("KEY_POINTS")[0].strip())
+            if "KEY_POINTS" in raw:
+                ib.add_depth("keypoints", raw.split("KEY_POINTS", 1)[1].split("ACTION_ITEMS")[0].strip())
+            if "ACTION_ITEMS" in raw:
+                ib.add_depth("actions", raw.split("ACTION_ITEMS", 1)[1].strip())
+            console.print(ib.render())
+        except Exception as e:
+            console.print(f"[red]Iceberg failed: {e}[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/vectors":
+        from .agent import _intel
+        if len(parts) > 1 and parts[1] == "reindex":
+            console.print("[cyan]Re-indexing repository into Chroma vector DB...[/]")
+            count = _intel.rag.index_directory(".")
+            console.print(f"[green]Indexed {count} chunks.[/]")
+        stats = _intel.rag.stats()
+        console.print(f"[bold]Vector DB:[/] backend={stats['backend']} chunks={stats['total_chunks']}")
+        for k, v in stats.get("by_type", {}).items():
+            console.print(f"  {k}: {v}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/episodes":
+        n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
+        from .agent import _intel
+        eps = _intel.episodic.recent(limit=n)
+        if not eps:
+            console.print("[yellow]No episodic memories yet.[/]")
+        for e in eps:
+            console.print(f"  [cyan]{e.request[:70]}[/] [dim]({e.quality}, {e.token_usage} tok)[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/semantic":
+        query = " ".join(parts[1:])
+        from .agent import _intel
+        if not query:
+            stats = _intel.semantic.stats()
+            console.print(f"[bold]Semantic Memory:[/] {stats.get('total', 0)} facts")
+            for cat, c in stats.get("by_category", {}).items():
+                console.print(f"  {cat}: {c}")
+        else:
+            facts = _intel.semantic.recall(query, top_k=8)
+            for f in facts:
+                console.print(f"  [{f.category}] {f.key}: {f.value[:120]}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/sensory":
+        from .agent import _intel
+        stats = _intel.sensory.stats()
+        console.print(f"[bold]Sensory Memory:[/] {_intel.sensory.summary()}")
+        for k, v in stats.items():
+            console.print(f"  {k}: {v}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/guardrails":
+        from .autonomy import SAFETY_LIMITS, DANGEROUS_TOOLS
+        console.print("[bold bright_red]Active Safety Guardrails[/]")
+        console.print(f"  Dangerous tools require approval: {', '.join(sorted(DANGEROUS_TOOLS))}")
+        for k, v in SAFETY_LIMITS.items():
+            console.print(f"  {k}: {v}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
     return client, mdl, messages, history, redo_stack, plan_mode, False
 
 
@@ -675,7 +831,7 @@ def run(prompt, model):
     client, _ = _get_client_and_model(mdl)
     text = _expand_at_refs(" ".join(prompt))
     ctx_block = _load_session_context()
-    run_agent(client, mdl, text, context_block=ctx_block)
+    run_agent(client, mdl, text, context_block=ctx_block, memory=_intel)
 
 
 @cli.command()
