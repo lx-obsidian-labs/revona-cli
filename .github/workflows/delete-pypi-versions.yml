@@ -1,0 +1,21 @@
+name: Delete old PyPI versions
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Delete all PyPI versions except 1.0.0
+        env:
+          PYPI_MANAGE_TOKEN: ${{ secrets.PYPI_MANAGE_TOKEN }}
+        run: |
+          pip install requests --quiet
+          python scripts/delete_pypi_versions.py
