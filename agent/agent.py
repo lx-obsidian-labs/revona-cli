@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from copy import deepcopy
+from datetime import datetime
 from typing import Any, Callable
 
 from rich.markdown import Markdown
@@ -50,6 +51,9 @@ _workspaces = WorkspaceManager()
 # Low-level agent loop
 # ---------------------------------------------------------------------------
 
+_TOOL_RESULT_LIMIT = 32000
+
+
 def _run_agent_loop(
     client,
     model: str,
@@ -61,6 +65,8 @@ def _run_agent_loop(
 ) -> tuple[str, list[dict]]:
     messages = [{"role": "system", "content": system_prompt}]
     messages.append({"role": "user", "content": user_prompt})
+    files_read: set[str] = set()
+    files_modified: set[str] = set()
 
     for i in range(max_iter):
         try:
@@ -96,17 +102,70 @@ def _run_agent_loop(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
+
+                fn_name = tc.function.name
+                fp = args.get("path", args.get("file", ""))
+
+                if fn_name == "read_file" and fp:
+                    files_read.add(str(Path(fp)))
+
+                if fn_name in ("write_file", "edit_file") and fp:
+                    fpath = str(Path(fp))
+                    if fpath not in files_read:
+                        warning = (
+                            f"WARNING: You are modifying '{fp}' without having read it first in this session. "
+                            "This is dangerous. You should read the file first to understand its current contents."
+                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": f"pre-{tc.id}",
+                            "content": warning,
+                        })
+                    files_modified.add(fpath)
+
                 if on_tool:
-                    on_tool(tc.function.name, args)
+                    on_tool(fn_name, args)
                 try:
-                    result = execute_tool(tc.function.name, args)
+                    result = execute_tool(fn_name, args)
                 except Exception as e:
-                    result = f"Tool error ({tc.function.name}): {e}"
+                    result = f"Tool error ({fn_name}): {e}"
+
+                content = str(result)[:_TOOL_RESULT_LIMIT]
+                if len(str(result)) > _TOOL_RESULT_LIMIT:
+                    content += f"\n... (truncated, total {len(str(result))} chars)"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": str(result)[:12000],
+                    "content": content,
                 })
+
+                if fn_name in ("write_file", "edit_file") and fp and allowed_tools:
+                    auto_read = {
+                        "id": f"auto-read-{tc.id}",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": json.dumps({"path": fp})},
+                    }
+                    read_exists = any(
+                        t.get("function", {}).get("name") == "read_file"
+                        for t in (allowed_tools if isinstance(allowed_tools, list) else [])
+                    )
+                    if read_exists:
+                        messages.append({
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [auto_read],
+                        })
+                        try:
+                            verify_result = execute_tool("read_file", {"path": fp})
+                        except Exception as e:
+                            verify_result = f"Auto-read error: {e}"
+                        verify_content = str(verify_result)[:_TOOL_RESULT_LIMIT]
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": auto_read["id"],
+                            "content": verify_content,
+                        })
+                        files_read.add(str(Path(fp)))
             continue
 
         final = msg.content or ""
@@ -311,7 +370,7 @@ def run_mission_engine(
         _update_tui("REFLECTION")
         _log("Reflecting on mission...")
         try:
-            _intel.after_mission(client, model, request, [], mission.edited_files)
+            _intel.after_mission(client, model, request, mission.tasks, mission.edited_files)
         except Exception as e:
             _log(f"Reflection error: {e}")
 
@@ -383,7 +442,7 @@ def _generate_plan(
 
 
 def _execute_plan(client, model: str, request: str, plan_text: str, mission: Mission) -> str:
-    """Execute the plan step by step."""
+    """Execute the plan step by step with error tracking."""
     builder = get_agent("builder")
     system = builder.system_prompt if builder else "You are a coding agent."
     tools = resolve_tools(builder.allowed_tools) if builder else TOOL_SCHEMAS
@@ -391,16 +450,45 @@ def _execute_plan(client, model: str, request: str, plan_text: str, mission: Mis
     messages = [{"role": "system", "content": f"{system}\n\n## Plan\n{plan_text}\n\nExecute this plan step by step."}]
     messages.append({"role": "user", "content": request})
 
+    error_counts: dict[str, int] = {}
+    files_successfully_written: set[str] = set()
+
     def _on_tool(name, args):
         if name in ("write_file", "edit_file"):
             fp = args.get("path", "")
             if fp:
                 mission.edited_files.add(fp)
+        if name == "run_shell":
+            cmd = args.get("command", "")
+            if "error" in cmd.lower() or "fail" in cmd.lower():
+                error_counts[cmd[:50]] = error_counts.get(cmd[:50], 0) + 1
+
+    original_on_tool = _on_tool
+
+    def _on_tool_with_learning(name, args):
+        original_on_tool(name, args)
+        if name in ("write_file", "edit_file"):
+            fp = args.get("path", "")
+            if fp:
+                files_successfully_written.add(fp)
+        total_errors = sum(error_counts.values())
+        if total_errors > 5:
+            for cmd, count in list(error_counts.items()):
+                if count >= 3:
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            f"PATTERN DETECTED: The command '{cmd}' has failed {count} times. "
+                            "Try a completely different approach. Read the error output carefully."
+                        ),
+                    })
+                    error_counts.clear()
+                    break
 
     final_text, _ = _run_agent_loop(
         client, model, system,
         f"## Plan\n{plan_text}\n\n## Request\n{request}",
-        tools, max_iter=50, on_tool=_on_tool,
+        tools, max_iter=50, on_tool=_on_tool_with_learning,
     )
     return final_text
 
@@ -453,11 +541,21 @@ def _security_review(client, model: str, mission: Mission) -> tuple[bool, str]:
     if not mission.edited_files:
         return True, "no files changed"
 
+    file_contents = []
+    for fp in list(mission.edited_files)[:10]:
+        try:
+            text = Path(fp).read_text(encoding="utf-8", errors="replace")
+            file_contents.append(f"### {fp}\n```\n{text[:8000]}\n```")
+        except Exception:
+            file_contents.append(f"### {fp}\n(Unable to read file)")
+
     prompt = (
-        "Review these changed files for security vulnerabilities:\n"
-        + "\n".join(f"- {f}" for f in list(mission.edited_files)[:20])
-        + "\n\nCheck for: hardcoded secrets, SQL injection, XSS, CSRF."
+        "Review these changed files for security vulnerabilities.\n\n"
+        "You MUST read each file below. The contents are provided for your review:\n\n"
+        + "\n\n".join(file_contents)
+        + "\n\nCheck for: hardcoded secrets, SQL injection, XSS, CSRF, insecure deserialization."
         + "\nIf no issues, say 'SECURE'."
+        + "\nIf issues found, list them with file:line references and severity."
     )
 
     text, _ = _run_agent_loop(
@@ -476,10 +574,19 @@ def _update_documentation(client, model: str, request: str, mission: Mission) ->
     if not mission.edited_files:
         return
 
+    file_contents = []
+    for fp in list(mission.edited_files)[:10]:
+        try:
+            text = Path(fp).read_text(encoding="utf-8", errors="replace")
+            file_contents.append(f"### {fp}\n```\n{text[:8000]}\n```")
+        except Exception:
+            file_contents.append(f"### {fp}\n(Unable to read file)")
+
     prompt = (
         f"## Request\n{request}\n\n"
-        f"## Files Changed\n" + "\n".join(f"- {f}" for f in list(mission.edited_files)[:20]) + "\n\n"
-        "Generate documentation updates for these changes."
+        f"## Changed Files (contents included for documentation)\n\n"
+        + "\n\n".join(file_contents)
+        + "\n\nGenerate documentation updates for these changes."
     )
 
     try:
@@ -495,7 +602,59 @@ def _update_documentation(client, model: str, request: str, mission: Mission) ->
 # Backward-compatible wrappers
 # ---------------------------------------------------------------------------
 
-def run_agent(client, model: str, prompt: str, messages: list | None = None, max_iter: int = 30, tui_state=None) -> list:
+def _build_chat_context(prompt: str, context_block: str = "") -> str:
+    """Build enriched context for a chat message by combining intelligence context,
+    ranked files/symbols, and semantic search results."""
+    parts = []
+    if context_block:
+        parts.append(context_block)
+
+    try:
+        ranked = _context_ranker.rank_context(prompt)
+        if ranked and len(ranked) > 50:
+            parts.append(ranked)
+    except Exception:
+        pass
+
+    try:
+        search_results = _semantic_search.search(prompt, top_k=5)
+        if search_results:
+            lines = ["## Auto-discovered relevant code"]
+            for r in search_results:
+                score = r.get("score", 0)
+                path = r.get("path", "")
+                snippet = r.get("snippet", "")[:300]
+                lines.append(f"  [{score:.2f}] {path}")
+                if snippet:
+                    lines.append(f"  ```\n{snippet}\n```")
+            parts.append("\n".join(lines))
+    except Exception:
+        pass
+
+    try:
+        _repo_db.initialize()
+        keywords = [w for w in prompt.lower().split() if len(w) > 3]
+        db_symbols = []
+        for kw in keywords[:3]:
+            syms = _repo_db.query_symbols(kw)
+            db_symbols.extend(syms[:5])
+        if db_symbols:
+            seen = set()
+            sym_lines = ["## Relevant symbols in codebase"]
+            for s in db_symbols:
+                key = f"{s['name']}:{s['path']}"
+                if key not in seen:
+                    seen.add(key)
+                    sym_lines.append(f"  - {s['name']} ({s['symbol_type']}) — {s['path']}")
+            if len(sym_lines) > 1:
+                parts.append("\n".join(sym_lines))
+    except Exception:
+        pass
+
+    return "\n\n".join(parts)
+
+
+def run_agent(client, model: str, prompt: str, messages: list | None = None, max_iter: int = 30, tui_state=None, context_block: str = "") -> list:
     """Simple chat loop (backward compatible)."""
     agent_spec = get_agent("builder")
     from .prompts import SYSTEM_PROMPT
@@ -503,10 +662,42 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
     tools = resolve_tools(agent_spec.allowed_tools) if agent_spec else TOOL_SCHEMAS
 
     if messages is None:
-        messages = [{"role": "system", "content": system}]
-    messages.append({"role": "user", "content": prompt})
+        system_content = system
+        if context_block:
+            system_content = f"{system}\n\n--- Project Context (auto-loaded) ---\n{context_block}\n--- End Context ---"
+        now = datetime.now()
+        system_content += (
+            f"\n\n[Runtime] Current time: {now.strftime('%Y-%m-%d %H:%M')}. "
+            f"Session started: {now.strftime('%H:%M')}. "
+            "You have file read, write, edit, list, grep, shell, and web_fetch tools."
+        )
+        messages = [{"role": "system", "content": system_content}]
+
+    enriched = _build_chat_context(prompt, context_block)
+    user_content = prompt
+    if enriched and len(enriched) > len(prompt) + 50:
+        user_content = f"{enriched}\n\n## User Request\n{prompt}"
+    messages.append({"role": "user", "content": user_content})
+
+    files_read: set[str] = set()
+    files_modified: set[str] = set()
+    error_count = 0
 
     for i in range(max_iter):
+        if i > 0 and i % 10 == 0:
+            try:
+                runtime_msg = (
+                    f"[Runtime update — iteration {i}] "
+                    f"Files read: {len(files_read)}, modified: {len(files_modified)}, errors: {error_count}. "
+                    f"Time: {datetime.now().strftime('%H:%M:%S')}. "
+                    "Stay focused on the task. Read files before editing."
+                )
+                messages.insert(1, {"role": "system", "content": runtime_msg})
+                if len(messages) > 50:
+                    messages = messages[:2] + messages[-48:]
+            except Exception:
+                pass
+
         try:
             resp = client.chat.completions.create(
                 model=model, messages=messages, tools=tools or None,
@@ -535,16 +726,90 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                detail = f"> {tc.function.name}({json.dumps(args)[:200]})"
+                fn_name = tc.function.name
+                fp = args.get("path", args.get("file", ""))
+
+                detail = f"> {fn_name}({json.dumps(args)[:200]})"
                 if tui_state:
                     tui_state.add_activity(detail)
                 else:
                     console.print(f"[dim]{detail}[/]")
+
+                if fn_name == "read_file" and fp:
+                    files_read.add(str(Path(fp)))
+
+                if fn_name in ("write_file", "edit_file") and fp:
+                    fpath = str(Path(fp))
+                    if fpath not in files_read:
+                        warning = (
+                            f"WARNING: Modifying '{fp}' without reading it first. "
+                            "Read the file first to avoid breaking existing code."
+                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": f"pre-{tc.id}",
+                            "content": warning,
+                        })
+                        if tui_state:
+                            tui_state.add_diagnostic(f"WARN: read before write: {fp}")
+                        else:
+                            console.print(f"[yellow]{warning}[/]")
+                    files_modified.add(fpath)
+                    try:
+                        _intel.working.observe(f"Modified: {fp}")
+                    except Exception:
+                        pass
+
                 try:
-                    result = execute_tool(tc.function.name, args)
+                    result = execute_tool(fn_name, args)
                 except Exception as e:
                     result = f"Tool error: {e}"
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(result)[:12000]})
+                    error_count += 1
+                    try:
+                        record = _recovery.record_failure(
+                            error_message=str(e),
+                            context=f"Tool: {fn_name}, args: {json.dumps(args)[:200]}",
+                        )
+                        strategies = _recovery.suggest_strategies(record)
+                        if strategies:
+                            hint = f"Recovery suggestion: {strategies[0].name} — {strategies[0].description}"
+                            result += f"\n{hint}"
+                            if tui_state:
+                                tui_state.add_diagnostic(hint)
+                    except Exception:
+                        pass
+
+                content = str(result)[:_TOOL_RESULT_LIMIT]
+                if len(str(result)) > _TOOL_RESULT_LIMIT:
+                    content += f"\n... (truncated, total {len(str(result))} chars)"
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
+
+                if fn_name in ("write_file", "edit_file") and fp and tools:
+                    has_read = any(
+                        t.get("function", {}).get("name") == "read_file"
+                        for t in tools
+                    )
+                    if has_read:
+                        auto_read_id = f"auto-read-{tc.id}"
+                        messages.append({
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{
+                                "id": auto_read_id,
+                                "type": "function",
+                                "function": {"name": "read_file", "arguments": json.dumps({"path": fp})},
+                            }],
+                        })
+                        try:
+                            verify_result = execute_tool("read_file", {"path": fp})
+                        except Exception as e:
+                            verify_result = f"Auto-read error: {e}"
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": auto_read_id,
+                            "content": str(verify_result)[:_TOOL_RESULT_LIMIT],
+                        })
+                        files_read.add(str(Path(fp)))
             continue
 
         try:
@@ -576,6 +841,14 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
                     parts.append(chunk.choices[0].delta.content)
             console.print()
         messages.append({"role": "assistant", "content": "".join(parts)})
+
+        if files_modified:
+            try:
+                _intel.working.open_files = list(files_modified)
+                _intel.working.current_task = prompt[:200]
+            except Exception:
+                pass
+
         return messages
 
     if tui_state:
@@ -646,7 +919,7 @@ def build(client, model: str, plan_messages: list, user_request: str, max_iter: 
             args = json.loads(tc.function.arguments or "{}")
             console.print(f"[dim]> {tc.function.name}({json.dumps(args)[:200]})[/]")
             result = execute_tool(tc.function.name, args)
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result[:12000]})
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(result)[:_TOOL_RESULT_LIMIT]})
 
     console.print("[yellow]Builder reached max iterations.[/]")
     return messages

@@ -351,7 +351,7 @@ class WorkerPool:
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": str(result)[:12000],
+                        "content": str(result)[:32000],
                     })
                 continue
 

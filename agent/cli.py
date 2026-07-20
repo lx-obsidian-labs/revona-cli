@@ -1,5 +1,7 @@
 import copy
 import re
+import time
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -17,7 +19,7 @@ from .agent import (
     plan, build, run_agent, orchestrator_build,
     run_mission_engine, verify_repository, search_repository,
     _mission_queue, _capabilities, _recovery, _checkpoints, _workspaces,
-    _repo_db, _semantic_search,
+    _repo_db, _semantic_search, _context_ranker, _intel,
 )
 from .mission_engine import MissionPriority, MissionState, QueueStatus, CheckpointManager
 from .capabilities import CapabilityDiscoveryEngine
@@ -25,9 +27,15 @@ from .recovery import RecoveryEngine
 from .verification import VerificationPipeline
 from .mission import Mission
 from .progress import ProgressEngine
-from .session import new_session_id, save_session
+from .memory import IntelligenceEngine, user_context_block, load_project_memory
+from .session import new_session_id, save_session, load_session, list_sessions, search_sessions
 from .models import load_cached_models, refresh as refresh_models
 from .terminal import console, print_table
+from .tools import (
+    read_file, write_file, edit_file, list_files, grep_files,
+    move_file, copy_file, delete_file, mkdir, tree, file_info,
+    find_files, git_status,
+)
 
 
 def _resolve_model(override: str | None = None) -> str:
@@ -57,13 +65,49 @@ def _expand_at_refs(text: str) -> str:
 # Interactive session
 # --------------------------------------------------------------------------
 
+def _load_session_context() -> str:
+    """Load intelligence context for the current session."""
+    try:
+        _intel_engine = IntelligenceEngine()
+        return _intel_engine.load_all()
+    except Exception:
+        pass
+    try:
+        parts = []
+        up = user_context_block()
+        if up:
+            parts.append(up)
+        pm = load_project_memory()
+        for name, content in pm.items():
+            if content.strip() and name not in ("Lessons.md", "Bugs.md", "API Index.md"):
+                parts.append(f"## {name.replace('.md', '')}\n{content.strip()[:2000]}")
+        lessons = pm.get("Lessons.md", "")
+        if lessons.strip():
+            lines = [l for l in lessons.split("\n") if l.strip().startswith("-")]
+            if lines:
+                parts.append("## Recent Lessons\n" + "\n".join(lines[-10:]))
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 def _start_interactive(model_override: str | None = None):
     mdl = _resolve_model(model_override)
     client, _ = _get_client_and_model(mdl)
     state_ref: dict[str, Any] = {"messages": None, "history": [], "redo_stack": [], "plan_mode": False, "session_id": new_session_id()}
 
+    session_context = _load_session_context()
+
+    watcher = None
+    try:
+        from .watcher import RepositoryWatcher
+        watcher = RepositoryWatcher()
+        watcher.start()
+    except Exception:
+        pass
+
     def _handle(state, text: str):
-        nonlocal client, mdl
+        nonlocal client, mdl, session_context
 
         if text.startswith("/"):
             try:
@@ -81,6 +125,10 @@ def _start_interactive(model_override: str | None = None):
             state_ref["plan_mode"] = new_plan_mode
             if handled:
                 state.add_timeline(f"Handled: {text}")
+                cmd_name = text.strip().split()[0].lower() if text.strip() else ""
+                if cmd_name in ("/init", "/brain", "/skills"):
+                    session_context = _load_session_context()
+                    state.add_timeline("Context refreshed")
                 return
         else:
             if text.lower() in ("exit", "quit", "q"):
@@ -106,7 +154,7 @@ def _start_interactive(model_override: str | None = None):
         state.add_timeline("Analysing request")
 
         try:
-            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state)
+            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state, context_block=session_context)
             state_ref["messages"] = messages
             if messages:
                 content = messages[-1].get("content", "")
@@ -171,6 +219,22 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
   /queue               Show mission queue
   /workspace           List workspaces
   /checkpoints         List checkpoints
+  /sessions            List saved sessions
+  /resume <id>         Resume a previous session
+  /history [n]         Show last N exchanges from current session
+  /refresh             Reload context from disk (memory, repo intel, experiences)
+  /context             Show what context is loaded for this session
+
+  [bold cyan]File Management:[/]
+  /tree [path] [depth] Show directory tree with sizes
+  /find <pattern>      Find files by glob pattern
+  /filestats [path]    Show file/directory statistics
+  /gitstatus           Show git status (modified, untracked, etc.)
+  /mv <src> <dst>      Move/rename a file
+  /cp <src> <dst>      Copy a file
+  /rm <path>           Delete a file or directory
+  /mkdir <path>        Create a directory
+
   /help                This help
   /exit, /quit         Exit
   @file                Reference a file in your prompt""")
@@ -251,6 +315,150 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
         else:
             for cp in cps[-10:]:
                 console.print(f"  {cp}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/sessions":
+        sessions = list_sessions()
+        if not sessions:
+            console.print("[yellow]No saved sessions.[/]")
+        else:
+            console.print(f"[bold]Sessions ({len(sessions)}):[/]")
+            for s in sessions[-15:]:
+                files = f"  [dim]({len(s['modified_files'])} files modified)[/]" if s["modified_files"] else ""
+                console.print(f"  [cyan]{s['id']}[/]  {s['message_count']} msgs{files}")
+                if s["first_message"]:
+                    console.print(f"    [dim]{s['first_message']}[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/resume":
+        if len(parts) < 2:
+            console.print("[yellow]Usage: /resume <session-id>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        sid = parts[1]
+        loaded = load_session(sid)
+        if not loaded:
+            console.print(f"[red]Session '{sid}' not found.[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        messages = loaded
+        user_msgs = [m for m in messages if m.get("role") == "user"]
+        console.print(f"[green]Resumed session {sid}[/] ({len(messages)} messages, {len(user_msgs)} user messages)")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/history":
+        n = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
+        if not messages:
+            console.print("[yellow]No messages in current session.[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        recent = messages[-(n * 2):]
+        for m in recent:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role == "user":
+                console.print(f"[bold blue]You:[/] {content[:200]}")
+            elif role == "assistant" and content:
+                console.print(f"[bold cyan]Agent:[/] {content[:200]}")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/refresh":
+        console.print("[cyan]Refreshing context from disk...[/]")
+        try:
+            _intel.load_all()
+        except Exception:
+            pass
+        try:
+            _repo_db.initialize()
+            _repo_db.scan_repository(Path("."))
+        except Exception:
+            pass
+        console.print("[green]Context refreshed.[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/context":
+        console.print("[bold]Session Context Summary[/]")
+        if messages:
+            sys_msg = messages[0].get("content", "") if messages else ""
+            console.print(f"  System prompt: {len(sys_msg)} chars")
+            user_msgs = [m for m in messages if m.get("role") == "user"]
+            assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+            tool_msgs = [m for m in messages if m.get("role") == "tool"]
+            console.print(f"  Messages: {len(user_msgs)} user, {len(assistant_msgs)} assistant, {len(tool_msgs)} tool calls")
+        else:
+            console.print("  [dim]No messages yet[/]")
+        try:
+            ranked = _context_ranker.rank_context("current")
+            console.print(f"  Ranked context: {len(ranked)} chars")
+        except Exception:
+            console.print("  Ranked context: unavailable")
+        try:
+            exp_count = len(_intel.experiences._experiences)
+            kg_count = len(_intel.knowledge_graph.nodes)
+            console.print(f"  Experience DB: {exp_count} entries")
+            console.print(f"  Knowledge Graph: {kg_count} nodes")
+        except Exception:
+            pass
+        try:
+            pm = load_project_memory()
+            console.print(f"  Project memory: {len(pm)} files")
+            up = user_context_block()
+            console.print(f"  User profile: {'loaded' if up else 'not found'}")
+        except Exception:
+            pass
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/tree":
+        path = parts[1] if len(parts) > 1 else "."
+        depth = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 3
+        console.print(f"[bold]Tree: {path} (depth={depth})[/]")
+        console.print(tree(path, depth))
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/find":
+        pattern = " ".join(parts[1:])
+        if not pattern:
+            console.print("[yellow]Usage: /find <glob pattern>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        console.print(find_files(pattern))
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/filestats":
+        path = parts[1] if len(parts) > 1 else "."
+        console.print(file_info(path))
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/gitstatus":
+        console.print(git_status())
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/mv":
+        if len(parts) < 3:
+            console.print("[yellow]Usage: /mv <source> <destination>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        console.print(move_file(parts[1], parts[2]))
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/cp":
+        if len(parts) < 3:
+            console.print("[yellow]Usage: /cp <source> <destination>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        console.print(copy_file(parts[1], parts[2]))
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/rm":
+        if len(parts) < 2:
+            console.print("[yellow]Usage: /rm <path>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        target = parts[1]
+        if Confirm.ask(f"[red]Delete '{target}'? This cannot be undone.[/]"):
+            console.print(delete_file(target))
+        else:
+            console.print("[dim]Cancelled.[/]")
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/mkdir":
+        if len(parts) < 2:
+            console.print("[yellow]Usage: /mkdir <path>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        console.print(mkdir(parts[1]))
         return client, mdl, messages, history, redo_stack, plan_mode, True
 
     if verb == "/models":
@@ -409,7 +617,8 @@ def run(prompt, model):
     mdl = _resolve_model(model)
     client, _ = _get_client_and_model(mdl)
     text = _expand_at_refs(" ".join(prompt))
-    run_agent(client, mdl, text)
+    ctx_block = _load_session_context()
+    run_agent(client, mdl, text, context_block=ctx_block)
 
 
 @cli.command()

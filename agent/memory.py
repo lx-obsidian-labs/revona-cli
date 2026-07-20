@@ -13,6 +13,7 @@ from .skills import KnowledgeEngine
 
 USER_DIR = Path.home() / ".config" / "revona" / "user"
 USER_PROFILE_PATH = USER_DIR / "profile.json"
+LOCAL_USER_PROFILE_PATH = Path(".user") / "profile.json"
 PROJECT_MEMORY_DIR = Path("AI")
 EXPERIENCES_DIR = AGENT_DIR / "experiences"
 KGRAPH_PATH = AGENT_DIR / "knowledge_graph.json"
@@ -81,11 +82,12 @@ def append_decision(title: str, context: str, decision: str) -> None:
 # ---------------------------------------------------------------------------
 
 def load_user_profile() -> dict[str, Any]:
-    if USER_PROFILE_PATH.exists():
-        try:
-            return json.loads(USER_PROFILE_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+    for path in (LOCAL_USER_PROFILE_PATH, USER_PROFILE_PATH):
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
     return {}
 
 
@@ -267,11 +269,20 @@ def reflect_on_mission(
     if not learner:
         return {"lesson": "", "quality": "", "decisions": []}
 
+    file_contents = []
+    for fp in list(edited_files)[:8]:
+        try:
+            text = Path(fp).read_text(encoding="utf-8", errors="replace")
+            file_contents.append(f"### {fp}\n```\n{text[:6000]}\n```")
+        except Exception:
+            file_contents.append(f"### {fp}\n(Unable to read file)")
+
     prompt = (
         f"## Request\n{request}\n\n"
-        f"## Files Changed\n{json.dumps(list(edited_files))}\n\n"
-        f"## Observations\n{chr(10).join(observations[-20:])}\n\n"
-        "Reflect on this mission. Output a JSON object with:\n"
+        f"## Changed Files (contents included for reflection)\n\n"
+        + "\n\n".join(file_contents)
+        + "\n\n## Observations\n" + chr(10).join(observations[-20:])
+        + "\n\nReflect on this mission. Output a JSON object with:\n"
         '- "lesson": a concise, reusable lesson\n'
         '- "quality": "excellent" | "good" | "mediocre" | "bad"\n'
         '- "security_issues": list of concerns\n'
@@ -335,9 +346,32 @@ class IntelligenceEngine:
             if lines:
                 parts.append("## Recent Lessons\n" + "\n".join(lines[-10:]))
 
-        top_nodes = list(self.knowledge_graph.nodes.values())[:20]
-        if top_nodes:
-            parts.append("## Knowledge Graph\n" + "\n".join(f"- {n.label} ({n.type})" for n in top_nodes))
+        if request:
+            query_terms = set(request.lower().split())
+            matched_nodes = []
+            for n in self.knowledge_graph.nodes.values():
+                label_lower = n.label.lower()
+                if any(t in label_lower for t in query_terms if len(t) > 2):
+                    matched_nodes.append(n)
+            if not matched_nodes:
+                matched_nodes = list(self.knowledge_graph.nodes.values())[:10]
+            if matched_nodes:
+                parts.append("## Knowledge Graph\n" + "\n".join(
+                    f"- {n.label} ({n.type})" for n in matched_nodes[:15]
+                ))
+        else:
+            top_nodes = list(self.knowledge_graph.nodes.values())[:10]
+            if top_nodes:
+                parts.append("## Knowledge Graph\n" + "\n".join(
+                    f"- {n.label} ({n.type})" for n in top_nodes
+                ))
+
+        if request:
+            relevant_experiences = self.experiences.search(request, min_confidence=0.2, top_k=3)
+            if relevant_experiences:
+                parts.append("## Relevant Past Solutions\n" + "\n".join(
+                    f"- **{e.problem[:80]}** → {e.solution[:200]}" for e in relevant_experiences
+                ))
 
         brain_ctx = self.brain.context_block()
         if brain_ctx:

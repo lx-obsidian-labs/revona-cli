@@ -26,3 +26,4 @@ packaging/npm/binary/
 packaging/npm/dist/
 *.egg-info/
 .agent/
+.github

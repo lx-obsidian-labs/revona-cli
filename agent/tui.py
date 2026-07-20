@@ -203,6 +203,10 @@ class CockpitState:
         self.mission_eta: str = ""
         self.capabilities_count: int = 0
         self.indexed_files: int = 0
+        self.memory_working: int = 0
+        self.memory_experiences: int = 0
+        self.memory_kg_nodes: int = 0
+        self.session_id: str = ""
 
         # Worker pool state
         self.workers: dict[str, str] = {}  # worker_name -> task_id
@@ -539,6 +543,17 @@ def _render_stats(state: CockpitState) -> Panel:
     if state.knowledge_stats:
         for k, v in list(state.knowledge_stats.items())[:3]:
             lines.append(f"  {k}: [{_ACCENT}]{v}[/]")
+    mem_parts = []
+    if state.memory_working > 0:
+        mem_parts.append(f"{state.memory_working} work")
+    if state.memory_experiences > 0:
+        mem_parts.append(f"{state.memory_experiences} exp")
+    if state.memory_kg_nodes > 0:
+        mem_parts.append(f"{state.memory_kg_nodes} kg")
+    if mem_parts:
+        lines.append(f"  Memory:     [{_ACCENT}]{' · '.join(mem_parts)}[/]")
+    if state.session_id:
+        lines.append(f"  Session:    [{_MUTED}]{state.session_id}[/]")
     return Panel("\n".join(lines), title="STATS", border_style=_BORDER)
 
 
