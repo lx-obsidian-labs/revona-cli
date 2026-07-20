@@ -36,6 +36,7 @@ from .tools import (
     move_file, copy_file, delete_file, mkdir, tree, file_info,
     find_files, git_status,
 )
+from .tui import CockpitState
 
 
 def _resolve_model(override: str | None = None) -> str:
@@ -180,10 +181,46 @@ def _start_interactive(model_override: str | None = None):
     try:
         from .tui import run_cockpit
         run_cockpit(mdl, _handle)
+    except KeyboardInterrupt:
+        pass
     except Exception as e:
-        console.print(f"[yellow]TUI unavailable ({e}). Using simple mode.[/]")
-        from .tui import _simple_fallback
-        _simple_fallback(mdl, _handle)
+        import traceback
+        err = str(e)
+        console.print(f"[yellow]TUI unavailable ({err}). Using simple mode.[/]")
+        try:
+            from .tui import _simple_fallback
+            _simple_fallback(mdl, _handle)
+        except Exception as e2:
+            console.print(f"[red]Simple mode also failed: {e2}[/]")
+            console.print("[dim]Falling back to basic input loop.[/]")
+            _basic_fallback(mdl, _handle)
+
+
+def _basic_fallback(model: str, on_message: Callable, initial_messages: list | None = None) -> None:
+    """Minimal input loop with no Rich TUI dependencies."""
+    from . import APP_NAME, VERSION
+    print(f"\n{APP_NAME} v{VERSION} — Model: {model or 'not set'}")
+    print("Type your message and press Enter. Type 'exit' to quit.\n")
+    state = CockpitState()
+    state.model = model or ""
+    messages = initial_messages or []
+    while True:
+        try:
+            raw = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nSession ended.")
+            break
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.lower() in ("exit", "quit", "q"):
+            break
+        try:
+            state_ref: dict[str, Any] = {"messages": messages}
+            on_message(state, stripped)
+            messages = state_ref.get("messages", messages)
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 # --------------------------------------------------------------------------
