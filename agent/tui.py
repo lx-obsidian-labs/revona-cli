@@ -478,10 +478,15 @@ def run_cockpit(
                         break
                     state.command_mode = True
                     state.add_message("user", line)
-                    state.status_message = f"CMD: {line.split("\n")[0][:60]}"
+                    state.status_message = f"CMD: {line.split(chr(10))[0][:60]}"
                     _ORB.set_state("planning", "Processing")
                     live.update(build_layout(state))
-                    on_message(state, line)
+                    try:
+                        on_message(state, line)
+                    except Exception as e:
+                        state.add_timeline(f"Cmd error: {type(e).__name__}")
+                        state.error_message = f"{type(e).__name__}: {str(e)[:100]}"
+                        state.add_diagnostic(f"CMD ERROR: {e}")
                     state.command_mode = False
                     state.status_message = "READY"
                     _ORB.set_state("idle")
@@ -496,7 +501,12 @@ def run_cockpit(
                 state.add_timeline(f"Processing: {line[:60]}")
                 live.update(build_layout(state))
 
-                on_message(state, line)
+                try:
+                    on_message(state, line)
+                except Exception as e:
+                    state.add_timeline(f"Error: {type(e).__name__}")
+                    state.error_message = f"{type(e).__name__}: {str(e)[:100]}"
+                    state.add_diagnostic(f"UNCAUGHT: {e}")
 
                 state.status_message = "READY"
                 _ORB.set_state("idle")

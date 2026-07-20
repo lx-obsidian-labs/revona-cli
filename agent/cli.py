@@ -68,7 +68,7 @@ def _start_interactive(model_override: str | None = None):
         if text.startswith("/"):
             try:
                 state.add_timeline(f"Command: {text}")
-                client, mdl, msgs, hist, redo, plan, handled = _handle_slash(
+                client, mdl, msgs, hist, redo, new_plan_mode, handled = _handle_slash(
                     text, client, mdl, state_ref["messages"], state_ref["history"],
                     state_ref["redo_stack"], state_ref["plan_mode"]
                 )
@@ -78,7 +78,7 @@ def _start_interactive(model_override: str | None = None):
             state_ref["messages"] = msgs
             state_ref["history"] = hist
             state_ref["redo_stack"] = redo
-            state_ref["plan_mode"] = plan
+            state_ref["plan_mode"] = new_plan_mode
             if handled:
                 state.add_timeline(f"Handled: {text}")
                 return
@@ -91,28 +91,40 @@ def _start_interactive(model_override: str | None = None):
         state_ref["redo_stack"].clear()
 
         if state_ref["plan_mode"]:
-            context = build_context()
-            state.add_timeline("Planning...")
-            plan(client, mdl, prompt_text, context)
+            try:
+                context = build_context()
+                state.add_timeline("Planning...")
+                plan(client, mdl, prompt_text, context)
+            except Exception as e:
+                state.add_timeline(f"Planning error: {type(e).__name__}")
+                state.error_message = f"Planning failed: {e}"
+                state.add_diagnostic(f"ERROR planning: {e}")
             return
 
         state.status_message = "PROCESSING"
         state.set_agent_status("Builder", "running")
         state.add_timeline("Analysing request")
-        state.add_timeline("Generating response")
-        state.confidence.set("Architecture", 0.85)
-        state.confidence.set("Security", 0.75)
 
-        messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state)
-        state_ref["messages"] = messages
-        if messages:
-            content = messages[-1].get("content", "")
-            if content:
-                state.add_message("assistant", content)
+        try:
+            messages = run_agent(client, mdl, prompt_text, messages=state_ref["messages"], tui_state=state)
+            state_ref["messages"] = messages
+            if messages:
+                content = messages[-1].get("content", "")
+                if content:
+                    state.add_message("assistant", content)
+            state.add_timeline("Response generated")
+            state.confidence.set("Architecture", 0.75)
+            state.confidence.set("Context Quality", 0.80)
+        except Exception as e:
+            state.add_timeline(f"Error: {type(e).__name__}")
+            state.error_message = f"Agent error: {e}"
+            state.add_diagnostic(f"ERROR: {e}")
+            state.confidence.set("Architecture", 0.20)
+
         state.set_agent_status("Builder", "idle")
         state.status_message = "READY"
         state.knowledge_stats["Learned Today"] = state.knowledge_stats.get("Learned Today", 0) + 1
-        save_session(state_ref["session_id"], messages)
+        save_session(state_ref["session_id"], state_ref.get("messages", []))
 
     try:
         from .tui import run_cockpit
@@ -397,7 +409,8 @@ def build_cmd(prompt, model, yes):
     progress = ProgressEngine("Build")
     mission = orchestrator_build(client, mdl, request, progress)
     save_session(new_session_id(), {"request": request, "mission_id": mission.id})
-    console.print(f"[green]Done.[/]  Tasks: {mission.status_counts()}")
+    score = mission.engineering_score()
+    console.print(f"[green]Done.[/]  Score: {score.get('overall', 0):.0f}/100")
 
 
 # --------------------------------------------------------------------------

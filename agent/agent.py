@@ -62,13 +62,19 @@ def _run_agent_loop(
     messages.append({"role": "user", "content": user_prompt})
 
     for i in range(max_iter):
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=allowed_tools or None,
-            stream=False,
-            temperature=0.2,
-        )
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=allowed_tools or None,
+                stream=False,
+                temperature=0.2,
+            )
+        except Exception as e:
+            error_msg = f"LLM API error ({type(e).__name__}): {str(e)[:200]}"
+            console.print(f"[red]{error_msg}[/]")
+            return error_msg, messages
+
         msg = resp.choices[0].message
 
         if msg.tool_calls:
@@ -85,14 +91,20 @@ def _run_agent_loop(
                 ],
             })
             for tc in msg.tool_calls:
-                args = json.loads(tc.function.arguments or "{}")
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
                 if on_tool:
                     on_tool(tc.function.name, args)
-                result = execute_tool(tc.function.name, args)
+                try:
+                    result = execute_tool(tc.function.name, args)
+                except Exception as e:
+                    result = f"Tool error ({tc.function.name}): {e}"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result[:12000],
+                    "content": str(result)[:12000],
                 })
             continue
 
@@ -116,17 +128,10 @@ def run_mission_engine(
     priority: MissionPriority = MissionPriority.NORMAL,
     auto_approve: bool = False,
 ) -> Mission:
-    """Full mission lifecycle using the formal state machine.
-
-    Mission → Repository Intelligence → Capability Discovery →
-    Architecture → Engineering Plan → Execution → Verification →
-    Self Review → Reflection → Learning → Knowledge Update → Mission Complete
-    """
+    """Full mission lifecycle using the formal state machine."""
     # Phase: MISSION_CREATED
     mission = Mission(request, mission_id=mission_id, priority=priority)
     _mission_queue.add(mission)
-
-    mission.transition_to(MissionState.DISCOVERY, "Starting mission")
 
     def _log(msg: str):
         if progress:
@@ -137,102 +142,142 @@ def run_mission_engine(
         else:
             console.print(f"[dim]{msg}[/]")
 
-    # Phase: CAPABILITY_DISCOVERY
-    mission.transition_to(MissionState.CAPABILITY_DISCOVERY)
-    _log("Discovering capabilities...")
-    capabilities = _capabilities.discover_all()
-    mission.capabilities = capabilities
-    caps_block = _capabilities.context_block
-
-    # Phase: REPOSITORY_ANALYSIS
-    mission.transition_to(MissionState.REPOSITORY_ANALYSIS)
-    _log("Analyzing repository...")
-    enriched = _intel.load_all(request)
-    mission.context = enriched
-
-    # Index repository in SQLite DB
     try:
-        _repo_db.initialize()
-        _repo_db.scan_repository(Path("."))
-    except Exception:
-        pass
+        mission.transition_to(MissionState.DISCOVERY, "Starting mission")
 
-    # Phase: ARCHITECTURE
-    mission.transition_to(MissionState.ARCHITECTURE)
-    _log("Planning architecture...")
-    architecture_text = _generate_architecture(client, model, request, enriched, caps_block)
-    mission.architecture = architecture_text
+        # Phase: CAPABILITY_DISCOVERY
+        mission.transition_to(MissionState.CAPABILITY_DISCOVERY)
+        _log("Discovering capabilities...")
+        try:
+            capabilities = _capabilities.discover_all()
+            mission.capabilities = capabilities
+            caps_block = _capabilities.context_block
+        except Exception as e:
+            _log(f"Capability discovery degraded: {e}")
+            caps_block = ""
 
-    # Phase: PLANNING
-    mission.transition_to(MissionState.PLANNING)
-    _log("Creating engineering plan...")
-    plan_text = _generate_plan(client, model, request, architecture_text, enriched, caps_block)
-    mission.plan = plan_text
+        # Phase: REPOSITORY_ANALYSIS
+        mission.transition_to(MissionState.REPOSITORY_ANALYSIS)
+        _log("Analyzing repository...")
+        try:
+            enriched = _intel.load_all(request)
+            mission.context = enriched
+        except Exception as e:
+            _log(f"Repository analysis degraded: {e}")
+            enriched = request
 
-    # Phase: WAITING_APPROVAL
-    mission.transition_to(MissionState.WAITING_APPROVAL)
-    if not auto_approve:
-        from rich.prompt import Confirm
-        console.print(Panel(Markdown(plan_text), title="Engineering Plan", border_style="green"))
-        if not Confirm.ask("\nApprove this plan and start execution?"):
-            mission.transition_to(MissionState.CANCELLED, "User cancelled")
+        # Index repository in SQLite DB
+        try:
+            _repo_db.initialize()
+            _repo_db.scan_repository(Path("."))
+        except Exception:
+            pass
+
+        # Phase: ARCHITECTURE
+        mission.transition_to(MissionState.ARCHITECTURE)
+        _log("Planning architecture...")
+        try:
+            architecture_text = _generate_architecture(client, model, request, enriched, caps_block)
+            mission.architecture = architecture_text
+        except Exception as e:
+            _log(f"Architecture phase error: {e}")
+            architecture_text = f"Architecture generation failed: {e}"
+
+        # Phase: PLANNING
+        mission.transition_to(MissionState.PLANNING)
+        _log("Creating engineering plan...")
+        try:
+            plan_text = _generate_plan(client, model, request, architecture_text, enriched, caps_block)
+            mission.plan = plan_text
+        except Exception as e:
+            _log(f"Planning phase error: {e}")
+            plan_text = f"Plan generation failed: {e}"
+
+        # Phase: WAITING_APPROVAL
+        mission.transition_to(MissionState.WAITING_APPROVAL)
+        if not auto_approve:
+            from rich.prompt import Confirm
+            console.print(Panel(Markdown(plan_text), title="Engineering Plan", border_style="green"))
+            if not Confirm.ask("\nApprove this plan and start execution?"):
+                mission.transition_to(MissionState.CANCELLED, "User cancelled")
+                return mission
+        _log("Plan approved, starting execution")
+
+        # Phase: EXECUTION
+        mission.transition_to(MissionState.EXECUTION)
+        try:
+            result = _execute_plan(client, model, request, plan_text, mission)
+            mission.files_changed = list(mission.edited_files)
+        except Exception as e:
+            mission.transition_to(MissionState.FAILED, str(e))
             return mission
-    _log("Plan approved, starting execution")
 
-    # Phase: EXECUTION
-    mission.transition_to(MissionState.EXECUTION)
-    try:
-        result = _execute_plan(client, model, request, plan_text, mission)
-        mission.files_changed = list(mission.edited_files)
+        # Phase: VALIDATION
+        mission.transition_to(MissionState.VALIDATION)
+        _log("Running verification pipeline...")
+        try:
+            verifier = VerificationPipeline()
+            verifier.discover()
+            results = verifier.run(discover=False)
+            mission.verification_results = verifier.results_dict
+        except Exception as e:
+            _log(f"Verification error: {e}")
+            verifier = None
+
+        if verifier and not verifier.required_passed:
+            mission.transition_to(MissionState.RECOVERING, "Verification failed, attempting recovery")
+            _log("Verification failed, attempting recovery...")
+            recovered = _attempt_recovery(client, model, verifier, mission)
+            if not recovered:
+                mission.transition_to(MissionState.FAILED, "Verification failed, recovery unsuccessful")
+                return mission
+            # Re-verify after recovery
+            try:
+                verifier.reset()
+                verifier.discover()
+                results = verifier.run(discover=False)
+                mission.verification_results = verifier.results_dict
+            except Exception:
+                pass
+
+        # Phase: SECURITY_REVIEW
+        mission.transition_to(MissionState.SECURITY_REVIEW)
+        _log("Running security review...")
+        try:
+            security_ok, security_text = _security_review(client, model, mission)
+            if not security_ok:
+                _log(f"Security issues found: {security_text[:200]}")
+        except Exception as e:
+            _log(f"Security review error: {e}")
+
+        # Phase: DOCUMENTATION
+        mission.transition_to(MissionState.DOCUMENTATION)
+        _log("Updating documentation...")
+        _update_documentation(client, model, request, mission)
+
+        # Phase: REFLECTION
+        mission.transition_to(MissionState.REFLECTION)
+        _log("Reflecting on mission...")
+        try:
+            _intel.after_mission(client, model, request, [], mission.edited_files)
+        except Exception as e:
+            _log(f"Reflection error: {e}")
+
+        # Phase: MISSION_COMPLETE
+        mission.transition_to(MissionState.MISSION_COMPLETE)
+
+        # Save checkpoint
+        try:
+            _checkpoints.save(mission.snapshot())
+        except Exception:
+            pass
+
+        _log(f"[green]Mission complete: {mission.summary()}[/]")
+
     except Exception as e:
-        mission.transition_to(MissionState.FAILED, str(e))
-        return mission
+        mission.transition_to(MissionState.FAILED, f"Unexpected error: {type(e).__name__}: {str(e)[:200]}")
+        console.print(f"[red]Mission crashed: {type(e).__name__}: {e}[/]")
 
-    # Phase: VALIDATION
-    mission.transition_to(MissionState.VALIDATION)
-    _log("Running verification pipeline...")
-    verifier = VerificationPipeline()
-    verifier.discover()
-    results = verifier.run(discover=False)
-    mission.verification_results = verifier.results_dict
-
-    if not verifier.required_passed:
-        # Try recovery
-        mission.transition_to(MissionState.RECOVERING, "Verification failed, attempting recovery")
-        _log("Verification failed, attempting recovery...")
-        recovered = _attempt_recovery(client, model, verifier, mission)
-        if not recovered:
-            mission.transition_to(MissionState.FAILED, "Verification failed, recovery unsuccessful")
-            return mission
-        mission.transition_to(MissionState.EXECUTION, "Recovery successful, continuing")
-        # Re-verify
-        results = verifier.run(discover=False)
-        mission.verification_results = verifier.results_dict
-
-    # Phase: SECURITY_REVIEW
-    mission.transition_to(MissionState.SECURITY_REVIEW)
-    _log("Running security review...")
-    security_ok, security_text = _security_review(client, model, mission)
-    if not security_ok:
-        _log(f"Security issues found: {security_text[:200]}")
-
-    # Phase: DOCUMENTATION
-    mission.transition_to(MissionState.DOCUMENTATION)
-    _log("Updating documentation...")
-    _update_documentation(client, model, request, mission)
-
-    # Phase: REFLECTION
-    mission.transition_to(MissionState.REFLECTION)
-    _log("Reflecting on mission...")
-    _intel.after_mission(client, model, request, [], mission.edited_files)
-
-    # Phase: MISSION_COMPLETE
-    mission.transition_to(MissionState.MISSION_COMPLETE)
-
-    # Save checkpoint
-    _checkpoints.save(mission.snapshot())
-
-    _log(f"[green]Mission complete: {mission.summary()}[/]")
     return mission
 
 
@@ -337,10 +382,13 @@ def _attempt_recovery(client, model: str, verifier: VerificationPipeline, missio
                         continue
         _recovery.mark_strategy_used(result)
     # Re-verify
-    verifier.reset()
-    verifier.discover()
-    verifier.run(discover=False)
-    return verifier.required_passed
+    try:
+        verifier.reset()
+        verifier.discover()
+        verifier.run(discover=False)
+        return verifier.required_passed
+    except Exception:
+        return False
 
 
 def _security_review(client, model: str, mission: Mission) -> tuple[bool, str]:
@@ -406,10 +454,18 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
     messages.append({"role": "user", "content": prompt})
 
     for i in range(max_iter):
-        resp = client.chat.completions.create(
-            model=model, messages=messages, tools=tools or None,
-            stream=False, temperature=0.2,
-        )
+        try:
+            resp = client.chat.completions.create(
+                model=model, messages=messages, tools=tools or None,
+                stream=False, temperature=0.2,
+            )
+        except Exception as e:
+            error_msg = f"LLM error ({type(e).__name__}): {str(e)[:200]}"
+            if tui_state:
+                tui_state.add_diagnostic(error_msg)
+            console.print(f"[red]{error_msg}[/]")
+            return messages
+
         msg = resp.choices[0].message
 
         if msg.tool_calls:
@@ -422,21 +478,34 @@ def run_agent(client, model: str, prompt: str, messages: list | None = None, max
                 ],
             })
             for tc in msg.tool_calls:
-                args = json.loads(tc.function.arguments or "{}")
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
                 detail = f"> {tc.function.name}({json.dumps(args)[:200]})"
                 if tui_state:
                     tui_state.add_activity(detail)
                 else:
                     console.print(f"[dim]{detail}[/]")
-                result = execute_tool(tc.function.name, args)
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result[:12000]})
+                try:
+                    result = execute_tool(tc.function.name, args)
+                except Exception as e:
+                    result = f"Tool error: {e}"
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(result)[:12000]})
             continue
 
-        stream = client.chat.completions.create(
-            model=model,
-            messages=messages + [{"role": "assistant", "content": msg.content}],
-            stream=True, temperature=0.2,
-        )
+        try:
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages + [{"role": "assistant", "content": msg.content}],
+                stream=True, temperature=0.2,
+            )
+        except Exception as e:
+            if tui_state:
+                tui_state.add_diagnostic(f"Stream error: {e}")
+            console.print(f"[red]Stream error: {e}[/]")
+            return messages
+
         if tui_state:
             tui_state.status_message = "Generating..."
             parts = []
@@ -532,8 +601,6 @@ def build(client, model: str, plan_messages: list, user_request: str, max_iter: 
 
 def orchestrator_build(client, model: str, request: str, progress) -> Any:
     """Legacy orchestrator — delegates to run_mission_engine."""
-    from .mission import Mission as LegacyMission
-    legacy = LegacyMission(request)
     return run_mission_engine(client, model, request, progress=progress, auto_approve=True)
 
 
