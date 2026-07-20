@@ -39,31 +39,6 @@ def _get_client_and_model(model: str | None = None):
     return get_client(model=model)
 
 
-def _check_update() -> None:
-    """Check PyPI for a newer version and prompt to upgrade."""
-    try:
-        import requests
-        resp = requests.get("https://pypi.org/pypi/revona/json", timeout=5)
-        if resp.status_code != 200:
-            return
-        latest = resp.json()["info"]["version"]
-        if latest == VERSION:
-            return
-        console.print(f"[dim]Update available: {VERSION} → [green]{latest}[/][/]")
-        if Confirm.ask("Upgrade now?", default=True):
-            import subprocess, sys
-            result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--upgrade", "revona"],
-                capture_output=True, text=True,
-            )
-            if result.returncode == 0:
-                console.print("[green]Upgrade complete! Restart to use the latest version.[/]")
-            else:
-                console.print(f"[red]Upgrade failed:\n{result.stderr.strip()}[/]")
-    except Exception:
-        pass
-
-
 def _expand_at_refs(text: str) -> str:
     def _replace(m):
         name = m.group(1)
@@ -379,7 +354,6 @@ def cli(ctx, model, no_banner, version):
         console.print(f"Revona CLI v{VERSION}")
         return
     ensure_dirs()
-    _check_update()
     if ctx.invoked_subcommand is None:
         if not no_banner:
             _print_banner()

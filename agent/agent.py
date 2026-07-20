@@ -11,7 +11,7 @@ from rich.panel import Panel
 from . import DEFAULT_MODEL
 from .agents import AGENTS, get as get_agent, resolve_tools
 from .capabilities import CapabilityDiscoveryEngine
-from .repo_intel import ContextRanker
+from .context_ranker import ContextRanker
 from .mission_engine import (
     Mission,
     MissionState,
@@ -24,7 +24,7 @@ from .mission_engine import (
 from .memory import IntelligenceEngine
 from .recovery import RecoveryEngine, FailureType, classify_failure
 from .repo_db import RepositoryDatabase
-from .repo_db import SemanticSearch
+from .semantic_search import SemanticSearch
 from .tools import TOOL_SCHEMAS, execute_tool
 from .terminal import console
 from .verification import VerificationPipeline

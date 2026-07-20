@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import itertools
 import queue
+import sys
 import threading
 import time
 from collections import deque
 from typing import Any, Callable
 
+from rich.columns import Columns
 from rich.console import Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn
 from rich.text import Text
 
-from . import APP_NAME, C_ACCENT, C_DIM, VERSION
+from . import APP_NAME, COMPANY, C_ACCENT, C_DIM, VERSION
 from .terminal import console, unicode_ok, detect
 from .mission_engine import MissionState
 
@@ -54,18 +57,14 @@ _STATE_COLORS = {
 
 
 # ---------------------------------------------------------------------------
-# Confidence Engine (v2.0)
+# Confidence Engine
 # ---------------------------------------------------------------------------
 
 class ConfidenceEngine:
     def __init__(self):
         self._scores: dict[str, float] = {
-            "Architecture": 0.0,
-            "Verification": 0.0,
-            "Tests": 0.0,
-            "Security": 0.0,
-            "Documentation": 0.0,
-            "Context Quality": 0.0,
+            "Architecture": 0.0, "Verification": 0.0, "Tests": 0.0,
+            "Security": 0.0, "Documentation": 0.0, "Context Quality": 0.0,
         }
 
     def set(self, domain: str, score: float) -> None:
@@ -103,22 +102,19 @@ class EngineeringPulse:
         self.mission_progress: float = 0.0
 
     def render(self) -> str:
-        health_pct = self.health * 100
-        bar_len = 20
-        filled = int(health_pct / 100 * bar_len)
+        hp = self.health * 100
+        bar_len = 12
+        filled = int(hp / 100 * bar_len)
         bar = "█" * filled + "░" * (bar_len - filled)
-        color = _GREEN if health_pct >= 80 else (_AMBER if health_pct >= 50 else _RED)
-        return (
-            f"  Health   [{color}]{bar}[/] {health_pct:.0f}%\n"
-            f"  Build    [{_GREEN if self.build == 'PASS' else _RED}]{self.build}[/]\n"
-            f"  Tests    {self.tests_passing:.0f}%\n"
-            f"  Coverage {self.coverage:.0f}%\n"
-            f"  Risk     {self.risk}"
-        )
+        color = _GREEN if hp >= 80 else (_AMBER if hp >= 50 else _RED)
+        return (f"  Health [{color}]{bar}[/] {hp:.0f}%\n"
+                f"  Build  [{_GREEN if self.build == 'PASS' else _RED}]{self.build}[/]\n"
+                f"  Tests  {self.tests_passing:.0f}%\n"
+                f"  Risk   {self.risk}")
 
 
 # ---------------------------------------------------------------------------
-# Cockpit State (v2.0)
+# Cockpit State
 # ---------------------------------------------------------------------------
 
 class CockpitState:
@@ -158,15 +154,13 @@ class CockpitState:
         self.streaming_text = text
 
     def add_timeline(self, label: str) -> None:
-        stamp = time.strftime("%H:%M")
-        self.timeline.append((stamp, label))
+        self.timeline.append((time.strftime("%H:%M"), label))
 
     def add_activity(self, msg: str) -> None:
         self.add_timeline(msg)
 
     def add_diagnostic(self, label: str) -> None:
-        stamp = time.strftime("%H:%M:%S")
-        self.diagnostics.append((stamp, label))
+        self.diagnostics.append((time.strftime("%H:%M:%S"), label))
 
     def set_agent_status(self, name: str, status: str) -> None:
         self.agents[name] = status
@@ -197,158 +191,239 @@ class IntelligenceOrb:
     def render(self) -> Text:
         self._frame += 1
         char = next(_ORB_FRAMES)
-        color_map = {"thinking": _CYAN, "planning": _AMBER, "coding": _GREEN, "idle": _MUTED, "done": _GREEN}
-        c = color_map.get(self._state, _MUTED)
-        label = self._label or self._state.upper()
-        return Text.assemble((char, f"bold {c}"), (" " + label, _MUTED))
+        cmap = {"thinking": _CYAN, "planning": _AMBER, "coding": _GREEN, "idle": _MUTED, "done": _GREEN}
+        c = cmap.get(self._state, _MUTED)
+        return Text.assemble((char, f"bold {c}"), (" " + (self._label or self._state.upper()), _MUTED))
 
 
 _ORB = IntelligenceOrb()
 
-_ICONS = {
-    "pending": "○" if _U else "O",
-    "running": "◐" if _U else "~",
-    "done": "✓" if _U else "+",
-    "failed": "✗" if _U else "x",
-}
 _AGENT_ICONS = {"running": "●", "idle": "○", "waiting": "◌", "error": "▲"}
 
 
 # ---------------------------------------------------------------------------
-# Renderers (v2.0 Mission Control)
+# Character-by-character input
+# ---------------------------------------------------------------------------
+
+if sys.platform == "win32":
+    import msvcrt as _msvcrt
+    def _read_key() -> str:
+        ch = _msvcrt.getch()
+        if ch in (b"\x00", b"\xe0"):
+            _msvcrt.getch()
+            return ""
+        try:
+            return ch.decode("utf-8")
+        except UnicodeDecodeError:
+            return ch.decode("cp1252", errors="replace")
+else:
+    import tty as _tty
+    import termios as _termios
+    def _read_key() -> str:
+        fd = sys.stdin.fileno()
+        old = _termios.tcgetattr(fd)
+        try:
+            _tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            _termios.tcsetattr(fd, _termios.TCSADRAIN, old)
+        return ch
+
+
+def _input_worker(input_queue: queue.Queue, state: CockpitState, stop_event: threading.Event) -> None:
+    buf: list[str] = []
+    while not stop_event.is_set():
+        ch = _read_key()
+        if not ch:
+            continue
+        if ch in ("\r", "\n"):
+            line = "".join(buf)
+            buf.clear()
+            stripped = line.strip()
+            if stripped.startswith("/"):
+                input_queue.put((line, False))
+            elif stripped.lower() in ("exit", "quit", "q", ""):
+                input_queue.put((line, True if stripped else False))
+            else:
+                input_queue.put((line, False))
+            state.input_text = ""
+            continue
+        if ch in ("\x7f", "\b"):
+            if buf:
+                buf.pop()
+            state.input_text = "".join(buf)
+            continue
+        if ch in ("\x03", "\x04"):
+            buf.clear()
+            state.input_text = ""
+            input_queue.put(("", False))
+            continue
+        buf.append(ch)
+        state.input_text = "".join(buf)
+
+
+# ---------------------------------------------------------------------------
+# Renderers
 # ---------------------------------------------------------------------------
 
 def _render_header(state: CockpitState) -> Panel:
-    title = Text.assemble(
+    left = Text.assemble(
         (f" {APP_NAME} ", f"bold white on {_ACCENT}"),
-        (f" {state.model or 'not set'} ", _MUTED),
+        (f" v{VERSION} ", _MUTED),
     )
-    orb = _ORB.render()
-    status = state.status_message or "READY"
-    health = f"H:{state.pulse.health*100:.0f}%" if state.pulse else ""
+    right = Text.assemble(
+        (f" {COMPANY} ", _MUTED),
+        f" {state.model or 'not set'} ",
+        (_ORB.render().plain, _MUTED),
+    )
+    return Panel(Group(left, right), style=_ACCENT)
+
+
+def _render_mission_bar(state: CockpitState) -> Panel:
+    name = state.mission_name or "No active mission"
+    bar = Progress(
+        BarColumn(bar_width=30, complete_style=_ACCENT, style=_BORDER),
+        TextColumn("{task.percentage:>3.0f}%", style=_MUTED),
+        console=console,
+    )
+    bar.add_task("ctx", total=100, completed=min(state.context_percent, 100))
+    sd = state.mission_state or "AWAITING MISSION"
+    sc = _STATE_COLORS.get(MissionState(state.mission_state), _WHITE) if state.mission_state else _MUTED
     return Panel(
-        Group(title, Text(f"{orb} {status}  {health}  {state.mission_state or ''}", style=_MUTED)),
-        style=_ACCENT,
+        Group(Text.assemble((f" {name}", f"bold {_WHITE}"), (f"  [{sc}]{sd}[/]", "")), bar),
+        border_style=_BORDER, padding=(0, 1),
     )
+
+
+def _render_input(state: CockpitState) -> Panel:
+    prompt = state.input_text or ""
+    if state.command_mode:
+        prompt = f"[bold]/[/]{prompt}"
+    lines = []
+    if "\n" in prompt:
+        for i, part in enumerate(prompt.split("\n")):
+            pfx = " [bold]>[/]" if i == 0 else "  "
+            lines.append(f"{pfx} {part}")
+    else:
+        lines.append(f" [bold]>[/] {prompt}")
+    lines.append("")
+    return Panel("\n".join(lines), title="INPUT", border_style=_BORDER)
 
 
 def _render_feed(state: CockpitState) -> Panel:
+    items = list(state.timeline)[-14:]
     lines = []
-    for stamp, label in list(state.timeline)[-20:]:
-        color = _RED if ("error" in label.lower() or "fail" in label.lower()) else (_GREEN if "complete" in label.lower() or "done" in label.lower() else _MUTED)
-        lines.append(f"  [{color}]{stamp}[/] {label}")
-    if not lines:
-        lines.append(f"  [{_MUTED}]Awaiting activity...[/]")
+    for stamp, label in items:
+        color = _MUTED
+        if "error" in label.lower() or "fail" in label.lower():
+            color = _RED
+        elif "complete" in label.lower() or "done" in label.lower() or "passed" in label.lower():
+            color = _GREEN
+        elif "running" in label.lower() or "processing" in label.lower():
+            color = _CYAN
+        lines.append(f" [{color}]{stamp}[/] {label}")
+    if state.show_diagnostics and state.diagnostics:
+        lines.append(f" [{_AMBER}]--- DIAGNOSTICS ---[/]")
+        for stamp, label in list(state.diagnostics)[-6:]:
+            lines.append(f" [{_RED}]{stamp}[/] {label}")
     if state.streaming_text:
-        lines.append(f"  [{_CYAN}]>>>[/] {state.streaming_text[-300:]}")
-    if state.input_text:
-        lines.append(f"  [bold]>[/] {state.input_text[:200]}")
+        lines.append(f" [{_CYAN}]>>>[/] {state.streaming_text[-300:]}")
+    if not lines:
+        lines.append(f" [{_MUTED}]Awaiting activity...[/]")
     return Panel("\n".join(lines), title="FEED", border_style=_BORDER)
+
+
+def _render_agents(state: CockpitState) -> Panel:
+    lines = [f"  {_ORB.render()}"]
+    agent_icons = {"commander": "◆", "mission planner": "▣", "repository analyst": "◈",
+                   "architect": "◇", "frontend engineer": "♢", "backend engineer": "♤",
+                   "qa engineer": "♠", "security engineer": "♡"}
+    for name, status in sorted(state.agents.items()):
+        icon = agent_icons.get(name.lower(), _AGENT_ICONS.get(status, "○"))
+        color = _GREEN if status == "running" else (_AMBER if status == "waiting" else _MUTED)
+        lines.append(f"  [{color}]{icon}[/] {name}")
+    if not state.agents:
+        lines.append(f"  [{_MUTED}]No agents active[/]")
+    return Panel("\n".join(lines), title="AGENTS", border_style=_BORDER)
+
+
+def _render_health(state: CockpitState) -> Panel:
+    return Panel(state.pulse.render(), title="HEALTH", border_style=_BORDER)
 
 
 def _render_stats(state: CockpitState) -> Panel:
     lines = []
-    if state.mission_name:
-        lines.append(f"  Mission: [{_ACCENT}]{state.mission_name}[/]")
-    if state.agents:
-        running = sum(1 for s in state.agents.values() if s == "running")
-        lines.append(f"  Agents: {len(state.agents)} ({running} running)")
-    lines.append(f"  T: {state.tokens_used:,}  Ctx: {state.context_percent:.0f}%")
-    lines.append(f"  Conﬁdence: {state.confidence.average()*100:.0f}%")
-    files = state.active_files or state.edited_files[-4:]
+    if state.knowledge_stats:
+        for k, v in state.knowledge_stats.items():
+            lines.append(f"  {k}: [{_ACCENT}]{v}[/]")
+    lines.append(f"  Tokens: [{_ACCENT}]{state.tokens_used:,}[/]")
+    lines.append(f"  Context: {state.context_percent:.0f}%")
+    lines.append(f"  Confidence: {state.confidence.average()*100:.0f}%")
+    if state.capabilities_count:
+        lines.append(f"  Capabilities: {state.capabilities_count}")
+    if state.indexed_files:
+        lines.append(f"  Indexed: {state.indexed_files}")
+    files = state.active_files or state.edited_files[-6:]
     if files:
         lines.append(f"  Files: {len(files)} changed")
-    if not lines:
-        lines.append(f"  [{_MUTED}]No stats[/]")
-    return Panel("\n".join(lines), title="STATUS", border_style=_BORDER)
+    return Panel("\n".join(lines), title="STATS", border_style=_BORDER)
 
 
 def _render_footer(state: CockpitState) -> Panel:
-    msg = state.error_message or state.status_message or "READY"
-    color = _RED if state.error_message else _WHITE
-    hint = "  /cmd  q:quit"
-    return Panel(
-        Text.assemble((msg, f"bold {color}"), (hint, _MUTED)),
-        border_style=_BORDER,
+    left = Text.assemble(
+        (_ORB.render().plain + " ", _MUTED),
+        (f" {state.status_message} ", f"bold {_WHITE}"),
     )
+    if state.error_message:
+        left = Text.assemble((state.error_message, f"bold {_RED}"))
+    hint = "  /cmd · q:quit"
+    return Panel(Group(left, Text(hint, style=_MUTED)), border_style=_BORDER)
 
 
 # ---------------------------------------------------------------------------
-# Layout builder (v2.0) — minimal 4-panel layout
+# Layout builder
 # ---------------------------------------------------------------------------
 
 def build_layout(state: CockpitState) -> Layout:
+    top = Layout()
+    top.split_column(
+        Layout(renderable=_render_header(state), size=3),
+        Layout(renderable=_render_mission_bar(state), size=4),
+    )
+
+    middle = Layout()
+    middle.split_row(
+        Layout(renderable=_render_input(state), size=26),
+        Layout(renderable=_render_feed(state)),
+        Layout(renderable=_render_agents(state), size=22),
+    )
+
+    bottom = Columns([_render_health(state), _render_stats(state)])
+
+    body = Layout()
+    body.split_column(
+        Layout(renderable=middle, ratio=3),
+        Layout(renderable=bottom, ratio=1),
+    )
+
     layout = Layout()
     layout.split_column(
-        Layout(name="header", renderable=_render_header(state), size=3),
-        Layout(name="body", ratio=1),
-        Layout(name="footer", renderable=_render_footer(state), size=3),
-    )
-    body = layout["body"]
-    body.split_row(
-        Layout(name="feed", renderable=_render_feed(state), ratio=3),
-        Layout(name="stats", renderable=_render_stats(state), size=28),
+        Layout(renderable=top, size=7),
+        Layout(renderable=body),
+        Layout(renderable=_render_footer(state), size=3),
     )
     return layout
 
 
 # ---------------------------------------------------------------------------
-# Input thread
-# ---------------------------------------------------------------------------
-
-def _input_worker(input_queue: queue.Queue, stop_event: threading.Event) -> None:
-    buffer: list[str] = []
-    while not stop_event.is_set():
-        try:
-            line = input()
-        except (EOFError, KeyboardInterrupt):
-            if buffer:
-                input_queue.put(("\n".join(buffer), True))
-            stop_event.set()
-            break
-
-        stripped = line.strip()
-
-        # Empty line with buffer → flush as a single batch
-        if not stripped and buffer:
-            input_queue.put(("\n".join(buffer), False))
-            buffer.clear()
-            continue
-
-        # Empty line without buffer → just redraw signal
-        if not stripped and not buffer:
-            input_queue.put(("", False))
-            continue
-
-        # Slash command → flush buffer first if non-empty, then send command
-        if stripped.startswith("/"):
-            if buffer:
-                input_queue.put(("\n".join(buffer), False))
-                buffer.clear()
-            input_queue.put((line, False))
-            continue
-
-        # Exit/quit → flush buffer then exit
-        if stripped.lower() in ("exit", "quit", "q"):
-            if buffer:
-                input_queue.put(("\n".join(buffer), False))
-                buffer.clear()
-            input_queue.put((line, False))
-            continue
-
-        # Accumulate into buffer
-        buffer.append(line)
-
-
-# ---------------------------------------------------------------------------
-# Main cockpit loop (v2.0)
+# Main cockpit loop
 # ---------------------------------------------------------------------------
 
 def run_cockpit(
     model: str,
     on_message: Callable,
     initial_messages: list | None = None,
-    refresh_rate: float = 0.15,
+    refresh_rate: float = 0.1,
 ) -> None:
     if not _INFO["is_tty"]:
         console.print("[yellow]TUI requires a TTY. Falling back to simple mode.[/]")
@@ -364,7 +439,7 @@ def run_cockpit(
     stop_event = threading.Event()
 
     input_thread = threading.Thread(
-        target=_input_worker, args=(input_queue, stop_event), daemon=True
+        target=_input_worker, args=(input_queue, state, stop_event), daemon=True
     )
     input_thread.start()
 
@@ -374,20 +449,16 @@ def run_cockpit(
             while not stop_event.is_set():
                 try:
                     raw = input_queue.get_nowait()
-                    if isinstance(raw, tuple):
-                        line, _is_batch = raw
-                    else:
-                        line, _is_batch = raw, False
+                    line, is_exit = raw if isinstance(raw, tuple) else (raw, False)
                 except queue.Empty:
-                    frame += 1
                     if frame % 3 == 0:
                         live.update(build_layout(state))
+                    frame += 1
                     time.sleep(refresh_rate / 3)
                     continue
 
                 stripped = line.strip()
 
-                # Empty redraw signal
                 if not stripped:
                     state.input_text = ""
                     live.update(build_layout(state))
@@ -395,33 +466,26 @@ def run_cockpit(
 
                 state.input_text = line
 
-                # Show multi-line indicator
-                if "\n" in line:
-                    line_count = line.count("\n") + 1
-                    state.add_timeline(f"Pasted {line_count} lines")
-
-                if stripped.lower() in ("exit", "quit", "q"):
+                if is_exit or stripped.lower() in ("exit", "quit", "q"):
                     state.status_message = "SHUTTING DOWN"
                     live.update(build_layout(state))
-                    time.sleep(0.5)
+                    time.sleep(0.3)
                     break
 
                 if stripped.startswith("/"):
                     cmd = stripped.split()[0].lower()
                     if cmd in ("/exit", "/quit"):
                         break
-
                     state.command_mode = True
                     state.add_message("user", line)
-                    state.status_message = f"COMMAND: {line.split("\n")[0][:60]}"
+                    state.status_message = f"CMD: {line.split("\n")[0][:60]}"
                     _ORB.set_state("planning", "Processing")
                     live.update(build_layout(state))
-
                     on_message(state, line)
                     state.command_mode = False
-                    state.input_text = ""
                     state.status_message = "READY"
                     _ORB.set_state("idle")
+                    state.input_text = ""
                     live.update(build_layout(state))
                     continue
 
@@ -447,21 +511,16 @@ def run_cockpit(
 
 def _simple_fallback(model: str, on_message: Callable, initial_messages: list | None = None) -> None:
     from rich.prompt import Prompt
-
     console.print(f"[dim]{APP_NAME} v{VERSION} — Model: {model or 'not set'}[/]\n")
     console.print("[dim](Press Enter on an empty line to send multi-line input)[/]\n")
-
     messages = initial_messages or []
     state = CockpitState()
     state.model = model or ""
     state.messages = messages
     buffer: list[str] = []
-
     while True:
         raw = Prompt.ask("[bold]>[/]")
         stripped = raw.strip()
-
-        # Empty line with buffer → flush as batch
         if not stripped and buffer:
             full_text = "\n".join(buffer)
             console.print(f"[dim]Sending {len(buffer)} lines[/]")
@@ -474,12 +533,8 @@ def _simple_fallback(model: str, on_message: Callable, initial_messages: list | 
             state.input_text = full_text
             on_message(state, full_text)
             continue
-
-        # Empty line without buffer → just redraw prompt silently
         if not stripped and not buffer:
             continue
-
-        # Slash command → flush buffer first if needed, then process immediately
         if stripped.startswith("/"):
             if buffer:
                 console.print(f"[dim]Flushing {len(buffer)} lines before command[/]")
@@ -494,8 +549,6 @@ def _simple_fallback(model: str, on_message: Callable, initial_messages: list | 
             state.input_text = raw
             on_message(state, raw)
             continue
-
-        # Exit/quit
         if stripped.lower() in ("exit", "quit", "q"):
             if buffer:
                 full_text = "\n".join(buffer)
@@ -505,7 +558,5 @@ def _simple_fallback(model: str, on_message: Callable, initial_messages: list | 
                 state.input_text = full_text
                 on_message(state, full_text)
             break
-
-        # Accumulate into buffer (multi-line paste)
         buffer.append(raw)
         console.print(f"[dim]Buffered: {len(buffer)} line(s) — send with empty Enter[/]")
