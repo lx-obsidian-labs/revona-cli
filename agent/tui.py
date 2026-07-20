@@ -823,7 +823,7 @@ def run_cockpit(
     input_thread.start()
 
     try:
-        with Live(build_layout(state), console=console, refresh_per_second=1 / refresh_rate, screen=True) as live:
+        with Live(build_layout(state), console=console, refresh_per_second=1 / refresh_rate, screen=False) as live:
             frame = 0
             while not stop_event.is_set():
                 try:
