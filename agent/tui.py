@@ -12,6 +12,7 @@ from rich.columns import Columns
 from rich.console import Group
 from rich.layout import Layout
 from rich.live import Live
+from rich.markdown import Markdown as RichMarkdown
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.text import Text
@@ -194,6 +195,7 @@ class CockpitState:
         self.mission_tasks: list[dict] = []
         self.timeline: deque[tuple[str, str]] = deque(maxlen=30)
         self.diagnostics: deque[tuple[str, str]] = deque(maxlen=20)
+        self.tool_calls: deque[dict] = deque(maxlen=50)
         self.show_diagnostics: bool = False
         self.edited_files: list[str] = []
         self.knowledge_stats: dict[str, int] = {
@@ -217,6 +219,7 @@ class CockpitState:
         self.memory_experiences: int = 0
         self.memory_kg_nodes: int = 0
         self.session_id: str = ""
+        self.chat_scroll_offset: int = 0
 
         # Worker pool state
         self.workers: dict[str, str] = {}  # worker_name -> task_id
@@ -239,6 +242,21 @@ class CockpitState:
 
     def add_diagnostic(self, label: str) -> None:
         self.diagnostics.append((time.strftime("%H:%M:%S"), label))
+
+    def log_tool_call(self, tool: str, args: dict, result: str = "", duration_ms: float = 0) -> None:
+        entry = {
+            "time": time.strftime("%H:%M:%S"),
+            "tool": tool,
+            "args": args,
+            "result": result[:200] if result else "",
+            "duration_ms": duration_ms,
+            "success": not result.startswith("ERROR") if result else True,
+        }
+        self.tool_calls.append(entry)
+        arg_summary = str(args)[:80] if args else ""
+        status = "✓" if entry["success"] else "✗"
+        ms = f" {duration_ms:.0f}ms" if duration_ms else ""
+        self.add_timeline(f"{status} {tool}({arg_summary}){ms}")
 
     def set_agent_status(self, name: str, status: str) -> None:
         self.agents[name] = status
@@ -444,17 +462,30 @@ def _render_mission_bar(state: CockpitState) -> Panel:
 
 
 def _render_input(state: CockpitState) -> Panel:
-    prompt = state.input_text or ""
-    if state.command_mode:
-        prompt = f"[bold bright_blue]/[/]{prompt}"
     lines = []
-    lines.append(f" [bold bright_blue]>[/] {prompt}")
-    lines.append("")
-    return Panel("\n".join(lines), title="INPUT", border_style=_BORDER_INPUT)
+    if state.command_mode:
+        lines.append(f" [bold {_AMBER}]CMD[/] [bold bright_blue]/[/]{state.input_text}")
+        lines.append(f" [dim]Tab to complete  Enter to run[/]")
+    elif state.input_text:
+        lines.append(f" [bold bright_blue]>[/] {state.input_text}")
+        lines.append("")
+    else:
+        lines.append(f" [bold bright_blue]>[/] ")
+        lines.append(f" [dim]Type a message or /help  Tab to autocomplete[/]")
+    title = "[bold]INPUT[/]"
+    if state.command_mode:
+        title += "  [bold bright_blue]/ CMD[/]"
+    elif state.status_message == "PROCESSING":
+        title += "  [bold bright_yellow]...[/]"
+    return Panel(
+        "\n".join(lines),
+        title=title,
+        border_style=_BORDER_INPUT,
+    )
 
 
 def _render_feed(state: CockpitState) -> Panel:
-    items = list(state.timeline)[-12:]
+    items = list(state.timeline)[-10:]
     lines = []
     for stamp, label in items:
         color = _MUTED
@@ -467,12 +498,26 @@ def _render_feed(state: CockpitState) -> Panel:
         elif "phase:" in label.lower() or "discovery" in label.lower() or "execution" in label.lower():
             color = _AMBER
         lines.append(f" [{_MUTED}]{stamp}[/] [{color}]{label}[/]")
+
+    if state.tool_calls:
+        tc_items = list(state.tool_calls)[-8:]
+        if tc_items:
+            lines.append(f" [{_AMBER}]--- TOOL CALLS ---[/]")
+            for tc in tc_items:
+                tool = tc.get("tool", "?")
+                success = tc.get("success", True)
+                dur = tc.get("duration_ms", 0)
+                icon = "\u2713" if success else "\u2717"
+                c = _GREEN if success else _RED
+                dur_str = f" {dur:.0f}ms" if dur else ""
+                lines.append(f" [{c}]{icon}[/] [{_CYAN}]{tool}[/][{_MUTED}]{dur_str}[/]")
+
     if state.show_diagnostics and state.diagnostics:
         lines.append(f" [{_RED}]--- ERRORS ---[/]")
         for stamp, label in list(state.diagnostics)[-4:]:
             lines.append(f" [{_RED}]{stamp}[/] {label}")
     if state.streaming_text:
-        lines.append(f" [{_CYAN}]▸[/] {state.streaming_text[-280:]}")
+        lines.append(f" [{_CYAN}]\u25b8[/] {state.streaming_text[-280:]}")
     if not lines:
         lines.append(f" [{_MUTED}]Awaiting activity...[/]")
     return Panel("\n".join(lines), title="FEED", border_style=_BORDER_FEED)
@@ -481,7 +526,6 @@ def _render_feed(state: CockpitState) -> Panel:
 def _render_agents(state: CockpitState) -> Panel:
     lines = []
     if state.parallel_mode:
-        # Show workers
         worker_count = state.max_workers
         active_workers = len(state.workers)
         lines.append(f"  [{_ACCENT}]Parallel Mode[/] ({active_workers}/{worker_count} active)")
@@ -493,22 +537,25 @@ def _render_agents(state: CockpitState) -> Panel:
                     if t.get("id") == task_id:
                         task_desc = t.get("description", "")[:20]
                         break
-                lines.append(f"  [{_GREEN}]▸[/] {worker_name}")
+                lines.append(f"  [{_GREEN}]\u25b6[/] {worker_name}")
                 if task_desc:
                     lines.append(f"    [{_MUTED}]{task_desc}[/]")
         else:
             lines.append(f"  [{_MUTED}]All workers idle[/]")
-        # Show task summary
         if state.parallel_tasks:
             lines.append("")
             done = sum(1 for t in state.parallel_tasks if t.get("status") in ("completed", "failed", "skipped"))
             total = len(state.parallel_tasks)
-            lines.append(f"  [{_WHITE}]{done}/{total}[/] tasks done")
+            pct = (done / total * 100) if total else 0
+            lines.append(f"  [{_WHITE}]{done}/{total}[/] tasks done [{_GREEN}]{pct:.0f}%[/]")
     else:
-        # Show agents (sequential mode)
         if state.agents:
+            running = sum(1 for s in state.agents.values() if s == "running")
+            total = len(state.agents)
+            lines.append(f"  [{_WHITE}]{running}/{total}[/] active")
+            lines.append("")
             for name, status in sorted(state.agents.items()):
-                icon = _AGENT_ICONS.get(status, "○")
+                icon = _AGENT_ICONS.get(status, "\u25cb")
                 if status == "running":
                     color = _GREEN
                     tag = "RUN"
@@ -592,23 +639,105 @@ def _render_footer(state: CockpitState) -> Panel:
 
 
 def _render_response(state: CockpitState) -> Panel:
-    lines = []
-    if state.messages:
-        for msg in state.messages[-4:]:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if role == "assistant" and content:
-                wrapped = content[:500]
-                if len(content) > 500:
-                    wrapped += "..."
-                lines.append(f" [{_CYAN}]Agent:[/] {wrapped}")
-            elif role == "user":
-                lines.append(f" [{_GREEN}]You:[/] {content[:200]}")
+    renderables = []
+
+    tool_calls_shown = 0
+    for tc in list(state.tool_calls)[-6:]:
+        tool_calls_shown += 1
+        tool = tc.get("tool", "?")
+        args = tc.get("args", {})
+        success = tc.get("success", True)
+        dur = tc.get("duration_ms", 0)
+        icon = "\u2713" if success else "\u2717"
+        color = _GREEN if success else _RED
+
+        arg_summary = ""
+        if "path" in args:
+            arg_summary = args["path"]
+        elif "pattern" in args:
+            arg_summary = args["pattern"]
+        elif "command" in args:
+            arg_summary = args["command"][:40]
+        elif "source" in args:
+            arg_summary = f"{args['source']} -> {args.get('destination', '?')}"
+        elif "url" in args:
+            arg_summary = args["url"][:40]
+
+        dur_str = f" {dur:.0f}ms" if dur else ""
+        header = Text.assemble(
+            (f"  {icon} ", f"bold {color}"),
+            (tool, f"bold {_CYAN}"),
+            (f" {arg_summary}" if arg_summary else "", _MUTED),
+            (dur_str, _MUTED),
+        )
+        renderables.append(header)
+
+    if tool_calls_shown:
+        renderables.append(Text(""))
+
+    display_msgs = state.messages[-6:] if state.messages else []
+    for msg in display_msgs:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        tool_calls = msg.get("tool_calls", [])
+
+        if role == "user" and content:
+            lines = content.split("\n")
+            preview = lines[0][:120]
+            if len(lines) > 1:
+                preview += f" (+{len(lines)-1} more lines)"
+            renderables.append(Text.assemble(
+                ("  \u25b6 ", f"bold {_GREEN}"),
+                ("You", f"bold {_GREEN}"),
+                (f"  {preview}", _WHITE),
+            ))
+
+        elif role == "assistant":
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {}).get("name", "?")
+                    renderables.append(Text.assemble(
+                        ("  \u25b8 ", f"bold {_AMBER}"),
+                        ("calling ", _MUTED),
+                        (fn, f"bold {_CYAN}"),
+                    ))
+            if content:
+                try:
+                    md = RichMarkdown(content[:1200])
+                    renderables.append(md)
+                except Exception:
+                    renderables.append(Text(f"  {content[:1200]}", _WHITE))
+                renderables.append(Text(""))
+
     if state.streaming_text:
-        lines.append(f" [{_CYAN}]▸[/] {state.streaming_text[-300:]}")
-    if not lines:
-        lines.append(f" [{_MUTED}]No responses yet — type a message below[/]")
-    return Panel("\n".join(lines), title="RESPONSE", border_style=_BORDER_ACCENT)
+        renderables.append(Text.assemble(
+            ("  \u25b8 ", f"bold {_CYAN}"),
+            (state.streaming_text[-400:], _CYAN),
+        ))
+
+    if not renderables:
+        renderables.append(Text("  No responses yet.", style=_MUTED))
+        renderables.append(Text(""))
+        renderables.append(Text("  Type a message below to get started.", style=_MUTED))
+        renderables.append(Text("  The agent will read your code, plan, and build.", style=f"{_MUTED}"))
+        renderables.append(Text(""))
+        renderables.append(Text("  Try:", style=_MUTED))
+        renderables.append(Text("    add user authentication", style=f"italic {_CYAN}"))
+        renderables.append(Text("    fix the bug in src/main.py", style=f"italic {_CYAN}"))
+        renderables.append(Text("    refactor the database layer", style=f"italic {_CYAN}"))
+
+    msg_count = len([m for m in state.messages if m.get("role") == "user"])
+    tc_count = len(state.tool_calls)
+    title = f"CHAT"
+    if msg_count or tc_count:
+        title += f"  ({msg_count} msgs, {tc_count} tools)"
+
+    return Panel(
+        Group(*renderables),
+        title=f"[bold]{title}[/]",
+        border_style=_BORDER_ACCENT,
+        padding=(0, 1),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -624,9 +753,9 @@ def build_layout(state: CockpitState) -> Layout:
 
     middle = Layout()
     middle.split_row(
-        Layout(renderable=_render_input(state), size=24),
-        Layout(renderable=_render_response(state)),
-        Layout(renderable=_render_feed(state)),
+        Layout(renderable=_render_input(state), size=28),
+        Layout(renderable=_render_response(state), ratio=3),
+        Layout(renderable=_render_feed(state), size=28),
         Layout(renderable=_render_agents(state), size=22),
     )
 
