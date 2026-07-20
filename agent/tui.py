@@ -324,6 +324,22 @@ else:
         return ch
 
 
+_COMMANDS = [
+    "/workers", "/mission", "/plan", "/build", "/help", "/exit", "/quit",
+    "/change model", "/models", "/init", "/save", "/skills", "/brain",
+    "/capabilities", "/search", "/verify", "/recovery", "/queue",
+    "/workspace", "/checkpoints", "/undo", "/redo", "/plan",
+]
+
+
+def _tab_complete(buf: list[str]) -> list[str]:
+    current = "".join(buf)
+    if not current.startswith("/"):
+        return []
+    lower = current.lower()
+    return [cmd for cmd in _COMMANDS if cmd.lower().startswith(lower)]
+
+
 def _input_worker(input_queue: queue.Queue, state: CockpitState, stop_event: threading.Event) -> None:
     buf: list[str] = []
     while not stop_event.is_set():
@@ -341,6 +357,16 @@ def _input_worker(input_queue: queue.Queue, state: CockpitState, stop_event: thr
             else:
                 input_queue.put((line, False))
             state.input_text = ""
+            continue
+        if ch == "\t":
+            matches = _tab_complete(buf)
+            if len(matches) == 1:
+                completion = matches[0][len("".join(buf)):]
+                buf.extend(list(completion + " "))
+                state.input_text = "".join(buf)
+            elif len(matches) > 1:
+                state.input_text = "".join(buf) + "  "
+                state.add_activity(f"Matches: {', '.join(matches[:6])}")
             continue
         if ch in ("\x7f", "\b"):
             if buf:
