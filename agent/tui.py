@@ -349,26 +349,34 @@ def _render_header(state: CockpitState) -> Panel:
         (f" {APP_NAME} ", f"bold white on {_ACCENT}"),
         (f" v{VERSION} ", _MUTED),
     )
+    orb = _ORB.render()
+    model_text = state.model or "not set"
     right = Text.assemble(
-        (f" {COMPANY} ", _MUTED),
-        f" {state.model or 'not set'} ",
-        (_ORB.render().plain, _MUTED),
+        (f" {model_text} ", _WHITE),
+        (" │ ", _BORDER),
+        (orb.plain, _MUTED),
     )
-    return Panel(Group(left, right), style=_ACCENT)
+    return Panel(Group(left, right), style=_ACCENT, padding=(0, 0))
 
 
 def _render_mission_bar(state: CockpitState) -> Panel:
     name = state.mission_name or "No active mission"
     bar = Progress(
-        BarColumn(bar_width=30, complete_style=_ACCENT, style=_BORDER),
+        BarColumn(bar_width=24, complete_style=_ACCENT, style=_BORDER),
         TextColumn("{task.percentage:>3.0f}%", style=_MUTED),
         console=console,
     )
     bar.add_task("ctx", total=100, completed=min(state.context_percent, 100))
-    sd = state.mission_state or "AWAITING MISSION"
+    sd = state.mission_state or "STANDBY"
     sc = _STATE_COLORS.get(MissionState(state.mission_state), _WHITE) if state.mission_state else _MUTED
+    left = Text.assemble(
+        (f" {name}", f"bold {_WHITE}"),
+    )
+    right = Text.assemble(
+        (f"[{sd}]", f"bold {sc}"),
+    )
     return Panel(
-        Group(Text.assemble((f" {name}", f"bold {_WHITE}"), (f"  [{sc}]{sd}[/]", "")), bar),
+        Group(Text.assemble(left, right), bar),
         border_style=_BORDER, padding=(0, 1),
     )
 
@@ -376,20 +384,15 @@ def _render_mission_bar(state: CockpitState) -> Panel:
 def _render_input(state: CockpitState) -> Panel:
     prompt = state.input_text or ""
     if state.command_mode:
-        prompt = f"[bold]/[/]{prompt}"
+        prompt = f"[bold bright_blue]/[/]{prompt}"
     lines = []
-    if "\n" in prompt:
-        for i, part in enumerate(prompt.split("\n")):
-            pfx = " [bold]>[/]" if i == 0 else "  "
-            lines.append(f"{pfx} {part}")
-    else:
-        lines.append(f" [bold]>[/] {prompt}")
+    lines.append(f" [bold bright_blue]>[/] {prompt}")
     lines.append("")
     return Panel("\n".join(lines), title="INPUT", border_style=_BORDER)
 
 
 def _render_feed(state: CockpitState) -> Panel:
-    items = list(state.timeline)[-14:]
+    items = list(state.timeline)[-12:]
     lines = []
     for stamp, label in items:
         color = _MUTED
@@ -399,63 +402,92 @@ def _render_feed(state: CockpitState) -> Panel:
             color = _GREEN
         elif "running" in label.lower() or "processing" in label.lower():
             color = _CYAN
-        lines.append(f" [{color}]{stamp}[/] {label}")
+        elif "phase:" in label.lower() or "discovery" in label.lower() or "execution" in label.lower():
+            color = _AMBER
+        lines.append(f" [{_MUTED}]{stamp}[/] [{color}]{label}[/]")
     if state.show_diagnostics and state.diagnostics:
-        lines.append(f" [{_AMBER}]--- DIAGNOSTICS ---[/]")
-        for stamp, label in list(state.diagnostics)[-6:]:
+        lines.append(f" [{_RED}]--- ERRORS ---[/]")
+        for stamp, label in list(state.diagnostics)[-4:]:
             lines.append(f" [{_RED}]{stamp}[/] {label}")
     if state.streaming_text:
-        lines.append(f" [{_CYAN}]>>>[/] {state.streaming_text[-300:]}")
+        lines.append(f" [{_CYAN}]▸[/] {state.streaming_text[-280:]}")
     if not lines:
         lines.append(f" [{_MUTED}]Awaiting activity...[/]")
     return Panel("\n".join(lines), title="FEED", border_style=_BORDER)
 
 
 def _render_agents(state: CockpitState) -> Panel:
-    lines = [f"  {_ORB.render()}"]
-    agent_icons = {"commander": "◆", "mission planner": "▣", "repository analyst": "◈",
-                   "architect": "◇", "frontend engineer": "♢", "backend engineer": "♤",
-                   "qa engineer": "♠", "security engineer": "♡"}
-    for name, status in sorted(state.agents.items()):
-        icon = agent_icons.get(name.lower(), _AGENT_ICONS.get(status, "○"))
-        color = _GREEN if status == "running" else (_AMBER if status == "waiting" else _MUTED)
-        lines.append(f"  [{color}]{icon}[/] {name}")
-    if not state.agents:
-        lines.append(f"  [{_MUTED}]No agents active[/]")
+    lines = []
+    if state.agents:
+        for name, status in sorted(state.agents.items()):
+            icon = _AGENT_ICONS.get(status, "○")
+            if status == "running":
+                color = _GREEN
+                tag = "RUN"
+            elif status == "waiting":
+                color = _AMBER
+                tag = "WAIT"
+            elif status == "error":
+                color = _RED
+                tag = "ERR"
+            else:
+                color = _MUTED
+                tag = "IDLE"
+            lines.append(f" [{color}]{icon}[/] {name} [{_MUTED}]{tag}[/]")
+    else:
+        lines.append(f" [{_MUTED}]No agents active[/]")
     return Panel("\n".join(lines), title="AGENTS", border_style=_BORDER)
 
 
 def _render_health(state: CockpitState) -> Panel:
-    return Panel(state.pulse.render(), title="HEALTH", border_style=_BORDER)
+    lines = []
+    h = state.pulse.health
+    h_color = _GREEN if h > 70 else (_AMBER if h > 40 else _RED)
+    lines.append(f"  [{h_color}]{h:.0f}%[/] Overall")
+    t = state.pulse.test_pass_rate
+    t_color = _GREEN if t > 70 else (_AMBER if t > 40 else _RED)
+    lines.append(f"  [{t_color}]{t:.0f}%[/] Tests")
+    b = state.pulse.build_success_rate
+    b_color = _GREEN if b > 70 else (_AMBER if b > 40 else _RED)
+    lines.append(f"  [{b_color}]{b:.0f}%[/] Build")
+    r = state.pulse.risk_score
+    r_color = _GREEN if r < 30 else (_AMBER if r < 60 else _RED)
+    lines.append(f"  [{r_color}]{r:.0f}%[/] Risk")
+    return Panel("\n".join(lines), title="HEALTH", border_style=_BORDER)
 
 
 def _render_stats(state: CockpitState) -> Panel:
     lines = []
+    lines.append(f"  Tokens:     [{_ACCENT}]{state.tokens_used:,}[/]")
+    ctx = state.context_percent
+    ctx_color = _GREEN if ctx > 70 else (_AMBER if ctx > 40 else _RED)
+    lines.append(f"  Context:    [{ctx_color}]{ctx:.0f}%[/]")
+    avg = state.confidence.average() * 100
+    c_color = _GREEN if avg > 70 else (_AMBER if avg > 40 else _RED)
+    lines.append(f"  Confidence: [{c_color}]{avg:.0f}%[/]")
+    if state.active_files or state.edited_files:
+        files = state.active_files or state.edited_files[-6:]
+        lines.append(f"  Files:      [{_WHITE}]{len(files)}[/]")
     if state.knowledge_stats:
-        for k, v in state.knowledge_stats.items():
+        for k, v in list(state.knowledge_stats.items())[:3]:
             lines.append(f"  {k}: [{_ACCENT}]{v}[/]")
-    lines.append(f"  Tokens: [{_ACCENT}]{state.tokens_used:,}[/]")
-    lines.append(f"  Context: {state.context_percent:.0f}%")
-    lines.append(f"  Confidence: {state.confidence.average()*100:.0f}%")
-    if state.capabilities_count:
-        lines.append(f"  Capabilities: {state.capabilities_count}")
-    if state.indexed_files:
-        lines.append(f"  Indexed: {state.indexed_files}")
-    files = state.active_files or state.edited_files[-6:]
-    if files:
-        lines.append(f"  Files: {len(files)} changed")
     return Panel("\n".join(lines), title="STATS", border_style=_BORDER)
 
 
 def _render_footer(state: CockpitState) -> Panel:
     left = Text.assemble(
         (_ORB.render().plain + " ", _MUTED),
-        (f" {state.status_message} ", f"bold {_WHITE}"),
+        (f" {state.status_message} ", _WHITE),
     )
     if state.error_message:
         left = Text.assemble((state.error_message, f"bold {_RED}"))
-    hint = "  /cmd · q:quit"
-    return Panel(Group(left, Text(hint, style=_MUTED)), border_style=_BORDER)
+    right = Text.assemble(
+        (" /menu", _MUTED),
+        (" · ", _BORDER),
+        ("q", _AMBER),
+        (":quit ", _MUTED),
+    )
+    return Panel(Group(left, right), border_style=_BORDER)
 
 
 # ---------------------------------------------------------------------------
@@ -471,12 +503,12 @@ def build_layout(state: CockpitState) -> Layout:
 
     middle = Layout()
     middle.split_row(
-        Layout(renderable=_render_input(state), size=26),
+        Layout(renderable=_render_input(state), size=24),
         Layout(renderable=_render_feed(state)),
         Layout(renderable=_render_agents(state), size=22),
     )
 
-    bottom = Columns([_render_health(state), _render_stats(state)])
+    bottom = Columns([_render_health(state), _render_stats(state)], padding=1)
 
     body = Layout()
     body.split_column(
