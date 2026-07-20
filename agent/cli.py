@@ -167,6 +167,7 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
   /verify              Run verification pipeline
   /recovery            Show recovery history
   /mission             Show current mission status
+  /workers <request>   Run mission in parallel worker mode
   /queue               Show mission queue
   /workspace           List workspaces
   /checkpoints         List checkpoints
@@ -213,6 +214,27 @@ def _handle_slash(cmd: str, client, mdl, messages, history, redo_stack, plan_mod
 
     if verb == "/queue":
         console.print(_mission_queue.summary())
+        return client, mdl, messages, history, redo_stack, plan_mode, True
+
+    if verb == "/workers":
+        request_text = " ".join(parts[1:]) if len(parts) > 1 else ""
+        if not request_text:
+            console.print("[yellow]Usage: /workers <request>[/]")
+            return client, mdl, messages, history, redo_stack, plan_mode, True
+        console.print(f"[cyan]Starting parallel mission with 4 workers...[/]")
+        from .progress import ProgressEngine
+        progress = ProgressEngine("Parallel Mission")
+        mission = run_mission_engine(
+            client, mdl, request_text,
+            auto_approve=True,
+            parallel=True,
+            max_workers=4,
+            progress=progress,
+        )
+        if mission.state == MissionState.MISSION_COMPLETE:
+            console.print(f"[green]Mission complete![/] {len(mission.edited_files)} files changed")
+        else:
+            console.print(f"[yellow]Mission ended: {mission.state.value}[/]")
         return client, mdl, messages, history, redo_stack, plan_mode, True
 
     if verb == "/workspace":
@@ -394,7 +416,9 @@ def run(prompt, model):
 @click.argument("prompt", nargs=-1, required=True)
 @click.option("--model", "-m", help="Model override")
 @click.option("--yes", "-y", is_flag=True, help="Skip approval prompt")
-def build_cmd(prompt, model, yes):
+@click.option("--parallel", "-P", is_flag=True, help="Enable parallel worker execution")
+@click.option("--workers", "-w", type=int, default=4, help="Number of parallel workers")
+def build_cmd(prompt, model, yes, parallel, workers):
     """Plan > approve > execute a full project (v1.x compat)."""
     mdl = _resolve_model(model)
     client, _ = _get_client_and_model(mdl)
@@ -425,7 +449,9 @@ def build_cmd(prompt, model, yes):
 @click.option("--model", "-m", help="Model override")
 @click.option("--yes", "-y", is_flag=True, help="Auto-approve plan")
 @click.option("--priority", "-p", type=click.Choice(["low", "normal", "high", "critical"]), default="normal")
-def mission(request, model, yes, priority):
+@click.option("--parallel", "-P", is_flag=True, help="Enable parallel worker execution")
+@click.option("--workers", "-w", type=int, default=4, help="Number of parallel workers (default: 4)")
+def mission(request, model, yes, priority, parallel, workers):
     """[v2.0] Start an engineering mission with the full state machine lifecycle."""
     mdl = _resolve_model(model)
     client, _ = _get_client_and_model(mdl)
@@ -435,11 +461,15 @@ def mission(request, model, yes, priority):
 
     console.print(f"[bold]Starting mission:[/] {request_text[:80]}...")
     console.print(f"[dim]Priority: {priority}[/]")
+    if parallel:
+        console.print(f"[cyan]Parallel mode:[/] {workers} workers")
 
     mission = run_mission_engine(
         client, mdl, request_text,
         priority=prio_map[priority],
         auto_approve=yes,
+        parallel=parallel,
+        max_workers=workers,
     )
 
     if mission.state == MissionState.MISSION_COMPLETE:
@@ -499,6 +529,37 @@ def recovery():
 def queue():
     """[v2.0] Show the mission queue."""
     console.print(_mission_queue.summary())
+
+
+@cli.command()
+@click.argument("request", nargs=-1, required=True)
+@click.option("--model", "-m", help="Model override")
+@click.option("--workers", "-w", type=int, default=4, help="Number of parallel workers")
+@click.option("--yes", "-y", is_flag=True, help="Auto-approve plan")
+def workers(request, model, workers, yes):
+    """[v2.0] Run a mission in parallel worker mode with N concurrent agents."""
+    mdl = _resolve_model(model)
+    client, _ = _get_client_and_model(mdl)
+    request_text = " ".join(request)
+
+    console.print(f"[bold cyan]Starting parallel mission with {workers} workers...[/]")
+    console.print(f"[dim]Request: {request_text[:80]}...[/]")
+
+    mission = run_mission_engine(
+        client, mdl, request_text,
+        auto_approve=yes,
+        parallel=True,
+        max_workers=workers,
+    )
+
+    if mission.state == MissionState.MISSION_COMPLETE:
+        score = mission.engineering_score()
+        console.print(f"\n[bold green]Mission Complete![/]  Score: {score['overall']:.0f}/100")
+        console.print(f"[dim]{mission.summary()}[/]")
+    elif mission.state == MissionState.FAILED:
+        console.print(f"\n[bold red]Mission Failed:[/] {mission.error}")
+    elif mission.state == MissionState.CANCELLED:
+        console.print("\n[yellow]Mission cancelled by user.[/]")
 
 
 @cli.command()

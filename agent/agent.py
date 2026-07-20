@@ -28,6 +28,7 @@ from .semantic_search import SemanticSearch
 from .tools import TOOL_SCHEMAS, execute_tool
 from .terminal import console
 from .verification import VerificationPipeline
+from .worker import ParallelOrchestrator, WorkerPool, TaskGraph
 
 
 # ---------------------------------------------------------------------------
@@ -127,10 +128,14 @@ def run_mission_engine(
     mission_id: str | None = None,
     priority: MissionPriority = MissionPriority.NORMAL,
     auto_approve: bool = False,
+    parallel: bool = False,
+    max_workers: int = 4,
 ) -> Mission:
     """Full mission lifecycle using the formal state machine."""
     # Phase: MISSION_CREATED
     mission = Mission(request, mission_id=mission_id, priority=priority)
+    mission.parallel_mode = parallel
+    mission.worker_count = max_workers
     _mission_queue.add(mission)
 
     def _log(msg: str):
@@ -220,8 +225,19 @@ def run_mission_engine(
         mission.transition_to(MissionState.EXECUTION)
         _update_tui("EXECUTION")
         try:
-            result = _execute_plan(client, model, request, plan_text, mission)
-            mission.files_changed = list(mission.edited_files)
+            if parallel:
+                _log(f"Starting parallel execution with {max_workers} workers...")
+                orchestrator = ParallelOrchestrator(max_workers=max_workers)
+                exec_result = orchestrator.execute(
+                    client, model, plan_text, request, progress=progress,
+                )
+                mission.files_changed = exec_result.get("files_changed", [])
+                mission.tasks = exec_result.get("tasks", [])
+                mission.edited_files = set(mission.files_changed)
+                _log(f"Parallel execution complete: {exec_result['stats']}")
+            else:
+                result = _execute_plan(client, model, request, plan_text, mission)
+                mission.files_changed = list(mission.edited_files)
         except Exception as e:
             mission.transition_to(MissionState.FAILED, str(e))
             _update_tui("FAILED", str(e))

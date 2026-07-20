@@ -186,6 +186,13 @@ class Mission:
         self.edited_files: set[str] = set()
         self.checkpoint_count: int = 0
 
+        # Parallel execution mode
+        self.parallel_mode: bool = False
+        self.worker_count: int = 4
+        self.tasks: list[dict] = []
+        self.worker_states: dict[str, str] = {}
+        self.task_progress: float = 0.0
+
         self.on_state_change: Callable | None = None
 
     @property
@@ -247,7 +254,13 @@ class Mission:
             agent_states=dict(self.agent_states),
             checkpoint_id=f"cp-{self.id}-{self.checkpoint_count}",
             timestamp=time.time(),
-            metadata={"priority": self.priority.name, "elapsed": self.elapsed()},
+            metadata={
+                "priority": self.priority.name,
+                "elapsed": self.elapsed(),
+                "parallel_mode": self.parallel_mode,
+                "worker_count": self.worker_count,
+                "task_progress": self.task_progress,
+            },
         )
 
     def summary(self) -> str:
@@ -259,6 +272,11 @@ class Mission:
             f"Verification: {sum(1 for v in self.verification_results.values() if v == True)}/{len(self.verification_results)} passed",
             f"Elapsed: {self.elapsed():.1f}s",
         ]
+        if self.parallel_mode:
+            parts.append(f"Mode: Parallel ({self.worker_count} workers)")
+            parts.append(f"Tasks: {len(self.tasks)} total")
+            done = sum(1 for t in self.tasks if t.get("status") in ("completed", "failed", "skipped"))
+            parts.append(f"Task progress: {done}/{len(self.tasks)}")
         return "\n".join(parts)
 
     def engineering_score(self) -> dict[str, float]:

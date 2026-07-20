@@ -204,6 +204,12 @@ class CockpitState:
         self.capabilities_count: int = 0
         self.indexed_files: int = 0
 
+        # Worker pool state
+        self.workers: dict[str, str] = {}  # worker_name -> task_id
+        self.parallel_tasks: list[dict] = []
+        self.parallel_mode: bool = False
+        self.max_workers: int = 4
+
     def add_message(self, role: str, content: str) -> None:
         self.messages.append({"role": role, "content": content})
         self.streaming_text = ""
@@ -249,6 +255,16 @@ class CockpitState:
                 t["status"] = status
                 return
         self.mission_tasks.append({"label": label, "status": status})
+
+    def update_workers(self, worker_states: dict[str, str]) -> None:
+        self.workers = worker_states
+
+    def update_parallel_tasks(self, tasks: list[dict]) -> None:
+        self.parallel_tasks = tasks
+
+    def set_parallel_mode(self, mode: bool, max_workers: int = 4) -> None:
+        self.parallel_mode = mode
+        self.max_workers = max_workers
 
 
 # ---------------------------------------------------------------------------
@@ -418,25 +434,51 @@ def _render_feed(state: CockpitState) -> Panel:
 
 def _render_agents(state: CockpitState) -> Panel:
     lines = []
-    if state.agents:
-        for name, status in sorted(state.agents.items()):
-            icon = _AGENT_ICONS.get(status, "○")
-            if status == "running":
-                color = _GREEN
-                tag = "RUN"
-            elif status == "waiting":
-                color = _AMBER
-                tag = "WAIT"
-            elif status == "error":
-                color = _RED
-                tag = "ERR"
-            else:
-                color = _MUTED
-                tag = "IDLE"
-            lines.append(f" [{color}]{icon}[/] {name} [{_MUTED}]{tag}[/]")
+    if state.parallel_mode:
+        # Show workers
+        worker_count = state.max_workers
+        active_workers = len(state.workers)
+        lines.append(f"  [{_ACCENT}]Parallel Mode[/] ({active_workers}/{worker_count} active)")
+        lines.append("")
+        if state.workers:
+            for worker_name, task_id in sorted(state.workers.items()):
+                task_desc = ""
+                for t in state.parallel_tasks:
+                    if t.get("id") == task_id:
+                        task_desc = t.get("description", "")[:20]
+                        break
+                lines.append(f"  [{_GREEN}]▸[/] {worker_name}")
+                if task_desc:
+                    lines.append(f"    [{_MUTED}]{task_desc}[/]")
+        else:
+            lines.append(f"  [{_MUTED}]All workers idle[/]")
+        # Show task summary
+        if state.parallel_tasks:
+            lines.append("")
+            done = sum(1 for t in state.parallel_tasks if t.get("status") in ("completed", "failed", "skipped"))
+            total = len(state.parallel_tasks)
+            lines.append(f"  [{_WHITE}]{done}/{total}[/] tasks done")
     else:
-        lines.append(f" [{_MUTED}]No agents active[/]")
-    return Panel("\n".join(lines), title="AGENTS", border_style=_BORDER)
+        # Show agents (sequential mode)
+        if state.agents:
+            for name, status in sorted(state.agents.items()):
+                icon = _AGENT_ICONS.get(status, "○")
+                if status == "running":
+                    color = _GREEN
+                    tag = "RUN"
+                elif status == "waiting":
+                    color = _AMBER
+                    tag = "WAIT"
+                elif status == "error":
+                    color = _RED
+                    tag = "ERR"
+                else:
+                    color = _MUTED
+                    tag = "IDLE"
+                lines.append(f" [{color}]{icon}[/] {name} [{_MUTED}]{tag}[/]")
+        else:
+            lines.append(f" [{_MUTED}]No agents active[/]")
+    return Panel("\n".join(lines), title="AGENTS" if not state.parallel_mode else "WORKERS", border_style=_BORDER)
 
 
 def _render_health(state: CockpitState) -> Panel:
