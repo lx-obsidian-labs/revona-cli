@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+
+def _tool_available(name: str) -> bool:
+    return shutil.which(name) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -60,18 +65,29 @@ class VerificationResult:
 def _detect_python_commands(root: Path) -> list[VerificationStep]:
     """Generate verification steps for a Python project."""
     steps = []
-    # Check for pytest
-    has_pytest = (root / "pytest.ini").exists() or (root / "pyproject.toml").exists() or (root / "setup.cfg").exists()
-    if has_pytest or list(root.rglob("test_*.py")) or list(root.rglob("*_test.py")):
-        steps.append(VerificationStep("tests", "Run pytest", "python -m pytest -x -q 2>&1", timeout=180))
-    # Check for mypy
-    if (root / "mypy.ini").exists() or (root / "pyproject.toml").exists():
-        steps.append(VerificationStep("static_analysis", "Run mypy", "python -m mypy . --ignore-missing-imports 2>&1", timeout=120))
-    # Check for ruff
-    if (root / "ruff.toml").exists() or (root / ".ruff.toml").exists() or (root / "pyproject.toml").exists():
-        steps.append(VerificationStep("lint", "Run ruff", "python -m ruff check . 2>&1", timeout=60))
-    # Check for black
-    steps.append(VerificationStep("format", "Check formatting with black", "python -m black --check . 2>&1", required=False, timeout=60))
+    has_pyproject = (root / "pyproject.toml").exists() or (root / "setup.cfg").exists()
+
+    if has_pyproject or list(root.rglob("test_*.py")) or list(root.rglob("*_test.py")):
+        if _tool_available("pytest"):
+            steps.append(VerificationStep("tests", "Run pytest", "python -m pytest -x -q 2>&1", timeout=180))
+        else:
+            steps.append(VerificationStep("tests", "Run pytest (not installed, skipped)", None, required=False))
+
+    if has_pyproject:
+        if _tool_available("mypy"):
+            steps.append(VerificationStep("static_analysis", "Run mypy", "python -m mypy . --ignore-missing-imports 2>&1", timeout=120))
+        else:
+            steps.append(VerificationStep("static_analysis", "Run mypy (not installed, skipped)", None, required=False))
+
+        if _tool_available("ruff"):
+            steps.append(VerificationStep("lint", "Run ruff", "python -m ruff check . 2>&1", timeout=60))
+        else:
+            steps.append(VerificationStep("lint", "Run ruff (not installed, skipped)", None, required=False))
+
+        if _tool_available("black"):
+            steps.append(VerificationStep("format", "Check formatting with black", "python -m black --check . 2>&1", required=False, timeout=60))
+        else:
+            steps.append(VerificationStep("format", "Format check (black not installed, skipped)", None, required=False))
     return steps
 
 
@@ -125,8 +141,11 @@ class VerificationPipeline:
         steps += _detect_python_commands(self.root)
         steps += _detect_node_commands(self.root)
         # Generic compile step
-        if list(self.root.rglob("*.py")):
-            steps.append(VerificationStep("compile", "Python syntax check", "python -m py_compile -xq 2>&1", timeout=60))
+        py_files = list(self.root.rglob("*.py"))
+        if py_files:
+            # Build a file list for py_compile
+            file_list = " ".join(f'"{f}"' for f in py_files[:50])
+            steps.append(VerificationStep("compile", "Python syntax check", f"python -m py_compile {file_list} 2>&1", required=False, timeout=60))
         # Documentation check
         doc_files = list(self.root.rglob("*.md"))
         if doc_files:

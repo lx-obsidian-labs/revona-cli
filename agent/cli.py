@@ -489,8 +489,16 @@ def queue():
 @click.argument("name", required=False)
 @click.argument("path", required=False)
 def workspace(name, path):
-    """[v2.0] Manage workspaces (list, add, switch)."""
-    if name and path:
+    """[v2.0] Manage workspaces: `revona workspace`, `revona workspace list`, `revona workspace add NAME PATH`."""
+    if name == "list":
+        console.print(_workspaces.summary())
+    elif name == "add":
+        if path:
+            _workspaces.add(name, path)
+            console.print(f"[green]Added workspace '{name}' → {path}[/]")
+        else:
+            console.print("[yellow]Usage: revona workspace add NAME PATH[/]")
+    elif name and path:
         _workspaces.add(name, path)
         console.print(f"[green]Added workspace '{name}' → {path}[/]")
     elif name:
@@ -533,11 +541,20 @@ def install(source, name):
 # --------------------------------------------------------------------------
 
 @cli.command()
+@click.argument("set_args", nargs=-1)
 @click.option("--key", help="Set NVIDIA_API_KEY (prefer env var)")
 @click.option("--model", "-m", help="Set default model ID")
 @click.option("--list-models", is_flag=True, help="List cached models")
-def config(key, model, list_models):
-    """View or set configuration."""
+def config(set_args, key, model, list_models):
+    """View or set configuration.
+
+    Usage:
+        revona config                          Show current config
+        revona config --model deepseek-v4-pro  Set model
+        revona config set model NAME           Set model (shorthand)
+        revona config set api_key KEY          Set API key
+        revona config --list-models            List cached models
+    """
     if list_models:
         models = load_cached_models()
         if not models:
@@ -550,6 +567,34 @@ def config(key, model, list_models):
 
     cfg = load_config()
     changed = False
+
+    # Normalize: strip literal "set" keyword if present
+    args = list(set_args)
+    if args and args[0].lower() == "set":
+        args = args[1:]
+
+    # Handle "set key value" or just "key value" syntax
+    if len(args) >= 2:
+        set_key = args[0].lower()
+        set_value = args[1]
+        if set_key == "model":
+            cached = load_cached_models()
+            if cached and not any(m["id"] == set_value for m in cached):
+                if not Confirm.ask(f"[yellow]'{set_value}' not in cache. Use anyway?[/]"):
+                    return
+            cfg["model"] = set_value
+            save_config(cfg)
+            console.print(f"[green]OK[/] Default set to [bold]{set_value}[/]")
+            changed = True
+        elif set_key in ("api_key", "key"):
+            import os
+            os.environ["NVIDIA_API_KEY"] = set_value
+            console.print(f"[green]OK[/] API key set (use NVIDIA_API_KEY env for persistence)")
+            changed = True
+        else:
+            console.print(f"[yellow]Unknown config key: '{set_key}'. Available: model, api_key[/]")
+    elif len(args) == 1:
+        console.print(f"[yellow]Usage: revona config set {args[0]} <value>[/]")
 
     if key:
         console.print("[yellow]Set the env var instead:[/]")
@@ -566,7 +611,7 @@ def config(key, model, list_models):
         console.print(f"[green]OK[/] Default set to [bold]{model}[/]")
         changed = True
 
-    if not changed:
+    if not changed and not args:
         console.print(f"Model:  [bold]{cfg.get('model')}[/]")
         status = "set" if cfg.get("api_key") else "not set"
         console.print(f"API key: {status} (use NVIDIA_API_KEY env)")

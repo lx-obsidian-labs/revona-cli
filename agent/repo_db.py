@@ -353,6 +353,7 @@ class RepositoryDatabase:
     # -----------------------------------------------------------------------
 
     def query_symbols(self, name: str, symbol_type: str | None = None) -> list[dict]:
+        self.initialize()
         conn = self._connect()
         if symbol_type:
             rows = conn.execute(
@@ -369,6 +370,7 @@ class RepositoryDatabase:
         return [dict(r) for r in rows]
 
     def query_imports(self, source: str) -> list[dict]:
+        self.initialize()
         conn = self._connect()
         rows = conn.execute(
             """SELECT i.*, f.path FROM imports i JOIN files f ON i.file_id = f.id
@@ -378,6 +380,7 @@ class RepositoryDatabase:
         return [dict(r) for r in rows]
 
     def query_routes(self, path_filter: str = "") -> list[dict]:
+        self.initialize()
         conn = self._connect()
         if path_filter:
             rows = conn.execute(
@@ -393,6 +396,7 @@ class RepositoryDatabase:
         return [dict(r) for r in rows]
 
     def query_components(self, name: str = "") -> list[dict]:
+        self.initialize()
         conn = self._connect()
         if name:
             rows = conn.execute(
@@ -408,6 +412,7 @@ class RepositoryDatabase:
         return [dict(r) for r in rows]
 
     def query_tests(self, status: str = "") -> list[dict]:
+        self.initialize()
         conn = self._connect()
         if status:
             rows = conn.execute(
@@ -423,6 +428,7 @@ class RepositoryDatabase:
         return [dict(r) for r in rows]
 
     def query_dependencies(self) -> list[dict]:
+        self.initialize()
         conn = self._connect()
         rows = conn.execute(
             "SELECT * FROM dependencies ORDER BY name"
@@ -430,7 +436,7 @@ class RepositoryDatabase:
         return [dict(r) for r in rows]
 
     def search_keyword(self, keyword: str) -> list[dict]:
-        """Search across all indexed content by keyword."""
+        self.initialize()
         conn = self._connect()
         results = []
         q = f"%{keyword}%"
@@ -454,6 +460,7 @@ class RepositoryDatabase:
         return results
 
     def stats(self) -> dict:
+        self.initialize()
         conn = self._connect()
         return {
             "files": conn.execute("SELECT COUNT(*) FROM files").fetchone()[0],
