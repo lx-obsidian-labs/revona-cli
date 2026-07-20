@@ -31,7 +31,7 @@ TEXT_EXTS = {
 # Brand
 APP_NAME = "Revona CLI"
 COMPANY = "LX Obsidian Labs"
-VERSION = "2.3.4"
+VERSION = "2.3.5"
 
 # Brand colours (Rich markup)
 C_PRIMARY = "black"

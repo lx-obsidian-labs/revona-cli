@@ -814,71 +814,70 @@ def run_cockpit(
     if initial_messages:
         state.messages = initial_messages
 
-    def _redraw() -> None:
+    def _redraw(live) -> None:
         try:
-            console.clear()
-            console.print(build_layout(state))
+            live.update(build_layout(state))
         except Exception:
             pass
 
     try:
-        while True:
-            _redraw()
-            try:
-                line = console.input("[bold bright_green]> [/]")
-            except (EOFError, KeyboardInterrupt):
-                break
-
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.lower() in ("exit", "quit", "q"):
-                state.status_message = "SHUTTING DOWN"
-                _redraw()
-                time.sleep(0.2)
-                break
-
-            state.input_text = line
-
-            if stripped.startswith("/"):
-                cmd = stripped.split()[0].lower()
-                if cmd in ("/exit", "/quit"):
+        with Live(build_layout(state), console=console, auto_refresh=False, screen=False) as live:
+            while True:
+                try:
+                    line = console.input("[bold bright_green]> [/]")
+                except (EOFError, KeyboardInterrupt):
                     break
-                state.command_mode = True
+
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.lower() in ("exit", "quit", "q"):
+                    state.status_message = "SHUTTING DOWN"
+                    _redraw(live)
+                    time.sleep(0.2)
+                    break
+
+                state.input_text = line
+
+                if stripped.startswith("/"):
+                    cmd = stripped.split()[0].lower()
+                    if cmd in ("/exit", "/quit"):
+                        break
+                    state.command_mode = True
+                    state.add_message("user", line)
+                    state.status_message = f"CMD: {stripped[:60]}"
+                    _ORB.set_state("planning", "Processing")
+                    _redraw(live)
+                    try:
+                        on_message(state, line)
+                    except Exception as e:
+                        state.add_timeline(f"Cmd error: {type(e).__name__}")
+                        state.error_message = f"{type(e).__name__}: {str(e)[:100]}"
+                        state.add_diagnostic(f"CMD ERROR: {e}")
+                    state.command_mode = False
+                    state.status_message = "READY"
+                    _ORB.set_state("idle")
+                    state.input_text = ""
+                    _redraw(live)
+                    continue
+
                 state.add_message("user", line)
-                state.status_message = f"CMD: {stripped[:60]}"
-                _ORB.set_state("planning", "Processing")
-                _redraw()
+                state.status_message = "PROCESSING"
+                _ORB.set_state("thinking", label="Thinking")
+                state.input_text = ""
+                state.add_timeline(f"Processing: {line[:60]}")
+                _redraw(live)
+
                 try:
                     on_message(state, line)
                 except Exception as e:
-                    state.add_timeline(f"Cmd error: {type(e).__name__}")
+                    state.add_timeline(f"Error: {type(e).__name__}")
                     state.error_message = f"{type(e).__name__}: {str(e)[:100]}"
-                    state.add_diagnostic(f"CMD ERROR: {e}")
-                state.command_mode = False
+                    state.add_diagnostic(f"UNCAUGHT: {e}")
+
                 state.status_message = "READY"
                 _ORB.set_state("idle")
-                state.input_text = ""
-                _redraw()
-                continue
-
-            state.add_message("user", line)
-            state.status_message = "PROCESSING"
-            _ORB.set_state("thinking", label="Thinking")
-            state.input_text = ""
-            state.add_timeline(f"Processing: {line[:60]}")
-            _redraw()
-
-            try:
-                on_message(state, line)
-            except Exception as e:
-                state.add_timeline(f"Error: {type(e).__name__}")
-                state.error_message = f"{type(e).__name__}: {str(e)[:100]}"
-                state.add_diagnostic(f"UNCAUGHT: {e}")
-
-            state.status_message = "READY"
-            _ORB.set_state("idle")
-            _redraw()
+                _redraw(live)
     except Exception as e:
         console.print(f"[yellow]TUI unavailable ({type(e).__name__}: {e}). Using simple mode.[/]")
         try:
