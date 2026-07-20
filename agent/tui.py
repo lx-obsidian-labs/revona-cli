@@ -18,6 +18,20 @@ from rich.progress import BarColumn, Progress, TextColumn
 from rich.text import Text
 
 from . import APP_NAME, COMPANY, C_ACCENT, C_DIM, VERSION
+from pathlib import Path as _Path
+
+import time as _time
+
+
+def _dbg_tui(msg: str) -> None:
+    try:
+        p = _Path.home() / ".revona" / "startup_debug.log"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(p), "a", encoding="utf-8") as f:
+            f.write(f"{_time.strftime('%H:%M:%S')} [tui] {msg}\n")
+            f.flush()
+    except Exception:
+        pass
 from .terminal import console, unicode_ok, detect
 from .mission_engine import MissionState
 
@@ -806,8 +820,10 @@ def run_cockpit(
 ) -> None:
     if not _INFO["is_tty"]:
         console.print("[yellow]TUI requires a TTY. Falling back to simple mode.[/]")
+        _dbg_tui("run_cockpit: is_tty=False -> simple fallback")
         _simple_fallback(model, on_message, initial_messages)
         return
+    _dbg_tui("run_cockpit: is_tty=True -> cockpit")
 
     state = CockpitState()
     state.model = model
@@ -880,6 +896,7 @@ def run_cockpit(
                 _redraw(live)
     except Exception as e:
         console.print(f"[yellow]TUI unavailable ({type(e).__name__}: {e}). Using simple mode.[/]")
+        _dbg_tui(f"run_cockpit: fell back to simple mode ({type(e).__name__}: {e})")
         try:
             _simple_fallback(model, on_message, initial_messages)
         except Exception as e2:

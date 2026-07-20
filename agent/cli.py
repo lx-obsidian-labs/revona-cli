@@ -1,5 +1,7 @@
 import copy
 import re
+import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +41,17 @@ from .tools import (
 from .tui import CockpitState
 
 
+def _dbg(msg: str) -> None:
+    try:
+        p = Path.home() / ".revona" / "startup_debug.log"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(p), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+            f.flush()
+    except Exception:
+        pass
+
+
 def _resolve_model(override: str | None = None) -> str:
     cfg = load_config()
     return override or cfg.get("model") or DEFAULT_MODEL
@@ -67,12 +80,35 @@ def _expand_at_refs(text: str) -> str:
 # --------------------------------------------------------------------------
 
 def _load_session_context() -> str:
-    """Load intelligence context for the current session."""
+    """Load intelligence context for the current session.
+
+    Reuses the module-level ``_intel`` engine (already initialized at import
+    time) instead of constructing a second IntelligenceEngine, which would open
+    a second ChromaDB PersistentClient on the same directory and deadlock on the
+    lock file. Wrapped in a timeout so a slow/hung load can never block startup.
+    """
+    _dbg("load_session_context: start")
     try:
-        _intel_engine = IntelligenceEngine()
-        return _intel_engine.load_all()
+        engine = _intel
     except Exception:
-        pass
+        engine = None
+    if engine is not None:
+        try:
+            result: dict = {}
+            def _run():
+                try:
+                    result["v"] = engine.load_all()
+                except Exception:
+                    result["v"] = None
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(20)
+            if "v" in result and result["v"] is not None:
+                _dbg("load_session_context: ok via _intel")
+                return result["v"]
+            _dbg("load_session_context: _intel.load_all timed out/errored")
+        except Exception:
+            _dbg("load_session_context: _intel path raised")
     try:
         parts = []
         up = user_context_block()
@@ -87,26 +123,33 @@ def _load_session_context() -> str:
             lines = [l for l in lessons.split("\n") if l.strip().startswith("-")]
             if lines:
                 parts.append("## Recent Lessons\n" + "\n".join(lines[-10:]))
+        _dbg("load_session_context: fallback ok")
         return "\n".join(parts)
     except Exception:
+        _dbg("load_session_context: fallback raised")
         return ""
 
 
 def _start_interactive(model_override: str | None = None):
+    _dbg("start_interactive: begin")
     mdl = _resolve_model(model_override)
+    _dbg(f"start_interactive: model={mdl}")
     client, _ = _get_client_and_model(mdl)
+    _dbg("start_interactive: client ready")
     state_ref: dict[str, Any] = {"messages": None, "history": [], "redo_stack": [], "plan_mode": False, "session_id": new_session_id()}
 
     session_context = _load_session_context()
+    _dbg("start_interactive: session context loaded")
 
     watcher = None
     try:
         from .watcher import RepositoryWatcher
         watcher = RepositoryWatcher()
         watcher.start()
+        _dbg("start_interactive: watcher started")
     except Exception:
-        pass
-
+        _dbg("start_interactive: watcher failed")
+    _dbg("start_interactive: calling run_cockpit")
     def _handle(state, text: str):
         nonlocal client, mdl, session_context
 
