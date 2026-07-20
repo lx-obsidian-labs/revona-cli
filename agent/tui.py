@@ -70,9 +70,16 @@ class ConfidenceEngine:
     def set(self, domain: str, score: float) -> None:
         self._scores[domain] = max(0.0, min(1.0, score))
 
+    def get(self, domain: str) -> float:
+        return self._scores.get(domain, 0.0)
+
     def average(self) -> float:
-        vals = list(self._scores.values())
+        vals = [v for v in self._scores.values() if v > 0]
         return sum(vals) / len(vals) if vals else 0.0
+
+    def reset(self) -> None:
+        for k in self._scores:
+            self._scores[k] = 0.0
 
     def render(self) -> str:
         lines = []
@@ -91,15 +98,65 @@ class ConfidenceEngine:
 
 class EngineeringPulse:
     def __init__(self):
-        self.health: float = 1.0
-        self.risk: str = "Low"
-        self.velocity: str = "High"
-        self.quality: str = "Excellent"
-        self.build: str = "PASS"
-        self.tests_passing: float = 100.0
+        self.health: float = 0.0
+        self.risk: str = "Unknown"
+        self.velocity: str = "Unknown"
+        self.quality: str = "Unknown"
+        self.build: str = "UNKNOWN"
+        self.tests_passing: float = 0.0
         self.coverage: float = 0.0
-        self.repository_health: float = 1.0
+        self.repository_health: float = 0.0
         self.mission_progress: float = 0.0
+        self._error_count: int = 0
+        self._success_count: int = 0
+
+    def record_success(self) -> None:
+        self._success_count += 1
+        self._recalculate()
+
+    def record_error(self) -> None:
+        self._error_count += 1
+        self._recalculate()
+
+    def update_health(self, score: float) -> None:
+        self.health = max(0.0, min(1.0, score))
+        self._recalculate()
+
+    def update_from_verification(self, results: dict) -> None:
+        if not results:
+            return
+        passed = sum(1 for v in results.values() if v is True)
+        total = len(results)
+        self.tests_passing = (passed / total * 100) if total else 0.0
+        self.build = "PASS" if passed == total else "FAIL"
+        self._recalculate()
+
+    def update_mission_progress(self, phase: str, phases_total: int = 10) -> None:
+        phase_order = [
+            "MISSION_CREATED", "DISCOVERY", "CAPABILITY_DISCOVERY",
+            "REPOSITORY_ANALYSIS", "ARCHITECTURE", "PLANNING",
+            "WAITING_APPROVAL", "EXECUTION", "VALIDATION",
+            "SECURITY_REVIEW", "DOCUMENTATION", "REFLECTION", "MISSION_COMPLETE",
+        ]
+        try:
+            idx = phase_order.index(phase) + 1
+        except ValueError:
+            idx = 0
+        self.mission_progress = (idx / phases_total * 100) if phases_total else 0.0
+
+    def _recalculate(self) -> None:
+        total = self._success_count + self._error_count
+        if total == 0:
+            self.health = 0.0
+            self.risk = "Unknown"
+            self.velocity = "Unknown"
+            self.quality = "Unknown"
+            return
+        success_rate = self._success_count / total
+        self.health = success_rate
+        self.risk = "Low" if success_rate > 0.9 else ("Medium" if success_rate > 0.7 else "High")
+        self.velocity = "High" if success_rate > 0.85 else ("Normal" if success_rate > 0.6 else "Low")
+        self.quality = "Excellent" if success_rate > 0.9 else ("Good" if success_rate > 0.7 else "Degraded")
 
     def render(self) -> str:
         hp = self.health * 100
@@ -107,8 +164,9 @@ class EngineeringPulse:
         filled = int(hp / 100 * bar_len)
         bar = "█" * filled + "░" * (bar_len - filled)
         color = _GREEN if hp >= 80 else (_AMBER if hp >= 50 else _RED)
+        build_color = _GREEN if self.build == "PASS" else (_RED if self.build == "FAIL" else _AMBER)
         return (f"  Health [{color}]{bar}[/] {hp:.0f}%\n"
-                f"  Build  [{_GREEN if self.build == 'PASS' else _RED}]{self.build}[/]\n"
+                f"  Build  [{build_color}]{self.build}[/]\n"
                 f"  Tests  {self.tests_passing:.0f}%\n"
                 f"  Risk   {self.risk}")
 
@@ -164,6 +222,26 @@ class CockpitState:
 
     def set_agent_status(self, name: str, status: str) -> None:
         self.agents[name] = status
+
+    def update_from_verification(self, results: dict) -> None:
+        if not results:
+            return
+        passed = sum(1 for v in results.values() if v is True)
+        total = len(results)
+        ratio = passed / total if total else 0
+        self.confidence.set("Verification", ratio)
+        self.confidence.set("Tests", ratio)
+        self.pulse.update_from_verification(results)
+
+    def update_from_mission(self, phase: str, error: str = "") -> None:
+        self.mission_state = phase
+        self.pulse.update_mission_progress(phase)
+        self.context_percent = self.pulse.mission_progress
+        if error:
+            self.pulse.record_error()
+            self.confidence.set("Security", max(0.0, self.confidence.get("Security") - 0.2))
+        else:
+            self.pulse.record_success()
 
     def set_task_status(self, label: str, status: str) -> None:
         for t in self.mission_tasks:

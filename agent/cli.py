@@ -113,13 +113,16 @@ def _start_interactive(model_override: str | None = None):
                 if content:
                     state.add_message("assistant", content)
             state.add_timeline("Response generated")
-            state.confidence.set("Architecture", 0.75)
-            state.confidence.set("Context Quality", 0.80)
+            state.confidence.set("Architecture", 0.80)
+            state.confidence.set("Context Quality", 0.75)
+            state.confidence.set("Verification", 0.60)
+            state.pulse.record_success()
         except Exception as e:
             state.add_timeline(f"Error: {type(e).__name__}")
             state.error_message = f"Agent error: {e}"
             state.add_diagnostic(f"ERROR: {e}")
-            state.confidence.set("Architecture", 0.20)
+            state.confidence.set("Architecture", 0.15)
+            state.pulse.record_error()
 
         state.set_agent_status("Builder", "idle")
         state.status_message = "READY"

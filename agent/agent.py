@@ -142,11 +142,20 @@ def run_mission_engine(
         else:
             console.print(f"[dim]{msg}[/]")
 
+    def _update_tui(phase: str, error: str = ""):
+        if progress:
+            try:
+                progress.update_from_mission(phase, error)
+            except Exception:
+                pass
+
     try:
         mission.transition_to(MissionState.DISCOVERY, "Starting mission")
+        _update_tui("DISCOVERY")
 
         # Phase: CAPABILITY_DISCOVERY
         mission.transition_to(MissionState.CAPABILITY_DISCOVERY)
+        _update_tui("CAPABILITY_DISCOVERY")
         _log("Discovering capabilities...")
         try:
             capabilities = _capabilities.discover_all()
@@ -158,6 +167,7 @@ def run_mission_engine(
 
         # Phase: REPOSITORY_ANALYSIS
         mission.transition_to(MissionState.REPOSITORY_ANALYSIS)
+        _update_tui("REPOSITORY_ANALYSIS")
         _log("Analyzing repository...")
         try:
             enriched = _intel.load_all(request)
@@ -175,6 +185,7 @@ def run_mission_engine(
 
         # Phase: ARCHITECTURE
         mission.transition_to(MissionState.ARCHITECTURE)
+        _update_tui("ARCHITECTURE")
         _log("Planning architecture...")
         try:
             architecture_text = _generate_architecture(client, model, request, enriched, caps_block)
@@ -185,6 +196,7 @@ def run_mission_engine(
 
         # Phase: PLANNING
         mission.transition_to(MissionState.PLANNING)
+        _update_tui("PLANNING")
         _log("Creating engineering plan...")
         try:
             plan_text = _generate_plan(client, model, request, architecture_text, enriched, caps_block)
@@ -195,6 +207,7 @@ def run_mission_engine(
 
         # Phase: WAITING_APPROVAL
         mission.transition_to(MissionState.WAITING_APPROVAL)
+        _update_tui("WAITING_APPROVAL")
         if not auto_approve:
             from rich.prompt import Confirm
             console.print(Panel(Markdown(plan_text), title="Engineering Plan", border_style="green"))
@@ -205,31 +218,41 @@ def run_mission_engine(
 
         # Phase: EXECUTION
         mission.transition_to(MissionState.EXECUTION)
+        _update_tui("EXECUTION")
         try:
             result = _execute_plan(client, model, request, plan_text, mission)
             mission.files_changed = list(mission.edited_files)
         except Exception as e:
             mission.transition_to(MissionState.FAILED, str(e))
+            _update_tui("FAILED", str(e))
             return mission
 
         # Phase: VALIDATION
         mission.transition_to(MissionState.VALIDATION)
+        _update_tui("VALIDATION")
         _log("Running verification pipeline...")
         try:
             verifier = VerificationPipeline()
             verifier.discover()
             results = verifier.run(discover=False)
             mission.verification_results = verifier.results_dict
+            if progress:
+                try:
+                    progress.update_from_verification(verifier.results_dict)
+                except Exception:
+                    pass
         except Exception as e:
             _log(f"Verification error: {e}")
             verifier = None
 
         if verifier and not verifier.required_passed:
             mission.transition_to(MissionState.RECOVERING, "Verification failed, attempting recovery")
+            _update_tui("RECOVERING")
             _log("Verification failed, attempting recovery...")
             recovered = _attempt_recovery(client, model, verifier, mission)
             if not recovered:
                 mission.transition_to(MissionState.FAILED, "Verification failed, recovery unsuccessful")
+                _update_tui("FAILED", "recovery failed")
                 return mission
             # Re-verify after recovery
             try:
@@ -242,21 +265,34 @@ def run_mission_engine(
 
         # Phase: SECURITY_REVIEW
         mission.transition_to(MissionState.SECURITY_REVIEW)
+        _update_tui("SECURITY_REVIEW")
         _log("Running security review...")
         try:
             security_ok, security_text = _security_review(client, model, mission)
             if not security_ok:
                 _log(f"Security issues found: {security_text[:200]}")
+            if progress:
+                try:
+                    progress.confidence.set("Security", 0.90 if security_ok else 0.30)
+                except Exception:
+                    pass
         except Exception as e:
             _log(f"Security review error: {e}")
 
         # Phase: DOCUMENTATION
         mission.transition_to(MissionState.DOCUMENTATION)
+        _update_tui("DOCUMENTATION")
         _log("Updating documentation...")
         _update_documentation(client, model, request, mission)
+        if progress:
+            try:
+                progress.confidence.set("Documentation", 0.70 if mission.edited_files else 0.0)
+            except Exception:
+                pass
 
         # Phase: REFLECTION
         mission.transition_to(MissionState.REFLECTION)
+        _update_tui("REFLECTION")
         _log("Reflecting on mission...")
         try:
             _intel.after_mission(client, model, request, [], mission.edited_files)
@@ -265,6 +301,7 @@ def run_mission_engine(
 
         # Phase: MISSION_COMPLETE
         mission.transition_to(MissionState.MISSION_COMPLETE)
+        _update_tui("MISSION_COMPLETE")
 
         # Save checkpoint
         try:
