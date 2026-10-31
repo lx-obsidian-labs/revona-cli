@@ -8,12 +8,20 @@ describe("Revona untrusted tool environment", () => {
       OPENAI_API_KEY: "provider", GITHUB_TOKEN: "github", AWS_SECRET_ACCESS_KEY: "aws",
       CUSTOM_API_KEY: "custom", SERVICE_AUTH_TOKEN: "token",
     };
-    const cleaned = revonaToolEnvironment(source);
-    expect(cleaned).toEqual({ PATH: "/usr/bin" });
+    expect(revonaToolEnvironment(source)).toEqual({ PATH: "/usr/bin" });
     expect(source.OPENAI_API_KEY).toBe("provider");
   });
-  it("rejects sensitive overrides", () => {
-    expect(() => revonaToolEnvironment({}, { OPENAI_API_KEY: "leak" })).toThrow();
+  it("rejects sensitive overrides including control-plane names", () => {
+    for (const key of ["OPENAI_API_KEY", "GITHUB_TOKEN", "GH_TOKEN", "OMB_CLOUD_AI_TOKEN", "OMB_LICENSE_KEY", "NPM_TOKEN"]) {
+      expect(() => revonaToolEnvironment({}, { [key]: "leak" })).toThrow();
+    }
+  });
+  it("strips lowercase and mixed-case secret names", () => {
+    expect(revonaToolEnvironment({
+      Path: "/bin", github_token: "secret", openai_api_key: "secret",
+      Omb_Cloud_Ai_Token: "secret", service_password: "secret",
+      cloud_private_key: "secret",
+    })).toEqual({ Path: "/bin" });
   });
   it("allows ordinary nonsecret settings", () => {
     expect(revonaToolEnvironment({ PATH: "/bin" }, { LANG: "en_US.UTF-8" })).toEqual({
