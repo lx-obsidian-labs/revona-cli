@@ -19,8 +19,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rsync -a --delete --exclude='.git/' /tmp/openmausbot/ ./
+          # The default GITHUB_TOKEN cannot create/update workflow files.
+          # Keep our workflow definitions and exclude upstream workflows.
+          rsync -a --delete --exclude='.git/' --exclude='.github/workflows/' /tmp/openmausbot/ ./
           git add -A
           if git diff --cached --quiet; then exit 0; fi
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Import complete OpenMausBot source as Revona Bot foundation'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Import OpenMausBot source excluding upstream workflows'
           git push origin HEAD:import/openmausbot-base
