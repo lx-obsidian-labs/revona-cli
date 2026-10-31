@@ -1,0 +1,86 @@
+import { createContext, useContext, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { cacheDesktopCapabilities, initialDesktopCapabilities, loadDesktopCapabilities } from "@/lib/desktop";
+
+type DesktopState = {
+  capabilities: DesktopCapabilities;
+  ready: boolean;
+};
+
+const DesktopContext = createContext<DesktopState>({
+  capabilities: initialDesktopCapabilities(),
+  ready: typeof window === "undefined" || !window.ogb,
+});
+
+export function DesktopCapabilitiesProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<DesktopState>(() => ({
+    capabilities: initialDesktopCapabilities(),
+    ready: typeof window === "undefined" || !window.ogb,
+  }));
+
+  useEffect(() => {
+    let alive = true;
+    let eventRevision = 0;
+    const unsubscribe = window.ogb?.onCapabilitiesChanged?.((capabilities) => {
+      eventRevision += 1;
+      if (alive) setState({ capabilities: cacheDesktopCapabilities(capabilities), ready: true });
+    });
+    const initialRevision = eventRevision;
+    void loadDesktopCapabilities().then((capabilities) => {
+      if (alive && eventRevision === initialRevision) {
+        setState({ capabilities, ready: true });
+      }
+    });
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  return <DesktopContext.Provider value={state}>{children}</DesktopContext.Provider>;
+}
+
+export function useDesktopCapabilities(): DesktopState {
+  return useContext(DesktopContext);
+}
+
+/**
+ * Electron zooms or minimizes on a double-click in a hiddenInset window's drag region, so no handler is needed.
+ * styles.css opts the controls inside a drag region back out.
+ */
+export function useCaptionChrome() {
+  const { capabilities } = useDesktopCapabilities();
+  return captionChrome(capabilities.windowChrome);
+}
+
+// SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline
+// style.
+const DRAG_STYLE = { WebkitAppRegion: "drag" } as CSSProperties;
+const NO_DRAG_STYLE = { WebkitAppRegion: "no-drag" } as CSSProperties;
+
+export type WindowDragProps = { "data-window-drag"?: ""; style?: CSSProperties };
+
+/** A window that draws its own frame: the top bar holding the traffic lights or the Windows caption buttons
+ * (WindowFrameBar), the rail of places, and the app in a rounded card beside them. Nothing under the bar makes room
+ * for the window's buttons. */
+export function windowFramed(windowChrome: DesktopCapabilities["windowChrome"] | undefined): boolean {
+  return windowChrome === "mac-inset" || windowChrome === "win-caption";
+}
+
+export function captionChrome(windowChrome: DesktopCapabilities["windowChrome"] | undefined) {
+  const windowsCaption = windowChrome === "win-caption";
+  const draggable = windowFramed(windowChrome);
+  const dragProps: WindowDragProps = draggable ? { "data-window-drag": "", style: DRAG_STYLE } : {};
+  return {
+    windowsCaption,
+    draggable,
+    dragProps,
+    dragStyle: draggable ? DRAG_STYLE : undefined,
+    noDragStyle: draggable ? NO_DRAG_STYLE : undefined,
+  };
+}
+
+export function WindowDragStrip() {
+  const { dragProps } = useCaptionChrome();
+  if (!dragProps.style) return null;
+  return <div aria-hidden data-window-drag-strip {...dragProps} className="pointer-events-none absolute inset-x-0 top-0 h-[52px]" />;
+}
