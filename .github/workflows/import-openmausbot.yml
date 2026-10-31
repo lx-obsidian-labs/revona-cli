@@ -1,0 +1,26 @@
+name: Import OpenMausBot foundation
+on:
+  push:
+    branches: [import/openmausbot-base]
+    paths: ['.github/workflows/import-openmausbot.yml']
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Clone upstream
+        run: git clone --depth 1 https://github.com/milind-soni/OpenMausBot.git /tmp/openmausbot
+      - name: Import source preserving destination Git history
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude='.git/' /tmp/openmausbot/ ./
+          git add -A
+          if git diff --cached --quiet; then exit 0; fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Import complete OpenMausBot source as Revona Bot foundation'
+          git push origin HEAD:import/openmausbot-base
