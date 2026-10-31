@@ -1,0 +1,32 @@
+name: Revona Windows compatibility
+on:
+  push:
+    branches: [import/openmausbot-base]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check Revona release blockers
+        run: node scripts/revona-release-audit.mjs
+      - name: Check credential boundary
+        run: pnpm exec vitest run server/revona/credential-boundary.test.ts
+      - name: TypeScript verification
+        run: pnpm typecheck
+      - name: Electron syntax
+        run: pnpm check:electron
+      - name: Production UI build
+        run: pnpm build
+      - name: Electron automated tests
+        run: pnpm test:electron
