@@ -14,7 +14,6 @@ const config = {
   protocols: [{ name: "Revona Bot", schemes: ["revona"] }],
   // Do not publish or generate update metadata targeting upstream releases.
   publish: null,
-  generateUpdatesFilesForAllChannels: false,
   files: [...(source.files ?? []), "!enterprise/**", "!**/enterprise/**"],
   extraResources: source.extraResources,
   nsis: {
