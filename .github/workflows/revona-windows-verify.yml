@@ -20,6 +20,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Generate Revona branded desktop and web icons
         run: node scripts/generate-revona-artwork.mjs
+      - name: Verify Revona splash and desktop icon
+        run: node --test electron/revona-branding.node-test.mjs
       - name: Generate isolated Revona Windows packaging configuration
         run: node scripts/generate-revona-builder.mjs
       - name: Test Revona packaging identity and update isolation
