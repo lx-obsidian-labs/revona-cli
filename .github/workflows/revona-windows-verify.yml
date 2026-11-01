@@ -22,6 +22,8 @@ jobs:
         run: node scripts/generate-revona-builder.mjs
       - name: Test Revona packaging identity and update isolation
         run: node --test scripts/revona-builder.node-test.mjs electron/revona-update-policy.node-test.mjs
+      - name: Validate Revona electron-builder configuration
+        run: pnpm exec electron-builder --config dist-revona/electron-builder.revona.yml --help
       - name: Check Revona release blockers
         run: node scripts/revona-release-audit.mjs
       - name: Check credential boundary
