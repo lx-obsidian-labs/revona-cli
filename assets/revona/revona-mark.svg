@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<title>Revona Bot — LX Obsidian Labs</title>
+<defs><linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f4c8ff"/><stop offset=".42" stop-color="#8b5cf6"/><stop offset=".72" stop-color="#5d5cff"/><stop offset="1" stop-color="#79dcff"/></linearGradient><radialGradient id="bg"><stop stop-color="#171b50"/><stop offset="1" stop-color="#070c21"/></radialGradient></defs>
+<rect width="1024" height="1024" rx="214" fill="url(#bg)"/>
+<path d="M231 252H630C798 252 846 348 792 460C754 535 663 567 559 592L753 783H595L417 600L315 805L393 509C498 480 642 466 682 398C710 346 668 325 573 314Z" fill="url(#r)"/>
+<path d="M252 402Q275 454 329 466Q276 477 251 531Q232 476 180 466Q232 456 252 402Z" fill="#f7e9ff"/>
+</svg>
