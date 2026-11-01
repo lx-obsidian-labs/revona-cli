@@ -71,6 +71,8 @@
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools && pnpm build:cloudflared && pnpm build:browser && pnpm build:duckdb",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:cua && electron-builder --mac --publish never",
     "package:win": "pnpm package:prepare && pnpm build:cua:win && electron-builder --win --publish never",
+    "revona:artwork": "node scripts/generate-revona-artwork.mjs",
+    "revona:package:win": "pnpm revona:artwork && pnpm package:prepare && pnpm build:cua:win && node scripts/generate-revona-builder.mjs && electron-builder --config dist-revona/electron-builder.revona.yml --win --publish never",
     "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux --x64 --publish never",
     "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux --x64 --publish never",
     "smoke:deb-command": "node scripts/smoke-deb-command.mjs",
