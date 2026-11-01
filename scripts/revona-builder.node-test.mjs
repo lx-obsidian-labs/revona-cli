@@ -11,7 +11,7 @@ test("Revona packaging has independent identity and no upstream update feed", ()
   assert.equal(config.appId, "za.co.lxobsidian.revona");
   assert.equal(config.productName, "Revona Bot");
   assert.equal(config.publish, null);
-  assert.equal(config.generateUpdatesFilesForAllChannels, false);
+  assert.equal(config.generateUpdatesFilesForAllChannels, undefined);
   assert.equal(config.nsis.shortcutName, "Revona Bot");
   assert.match(config.nsis.artifactName, /^Revona-Bot-/);
   assert.ok(config.files.includes("!enterprise/**"));
