@@ -14,6 +14,7 @@ import { canInstallElevated, installPackageElevated } from "./elevated-install.m
 import { releaseSingleInstanceLock } from "./single-instance.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { revonaUpdatesDisabled } from "./revona-update-policy.mjs";
 import { createQuietInstall, installFailed, launchAfter, LOOK_EVERY_MS, updateSeen } from "./update-when-quiet.mjs";
 
 export { quietSignals } from "./update-when-quiet-main.mjs";
@@ -146,6 +147,11 @@ export function attachUpdaterWindow(mainWindow) {
 
 /** `signals` (quietSignals): what tells a quiet moment; without them a downloaded update installs only on Restart or quit. */
 export function startUpdater(signals = null) {
+  if (revonaUpdatesDisabled({ packaged: app.isPackaged, appName: app.getName() })) {
+    updaterCoordinator = null;
+    setState({ status: "idle", message: "Revona updates are not configured yet." });
+    return;
+  }
   if (!app.isPackaged) {
     updaterCoordinator = null;
     setState({ status: "idle" });
