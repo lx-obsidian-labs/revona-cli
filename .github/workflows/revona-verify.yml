@@ -20,6 +20,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Release identity and licensing audit (report only)
         run: node scripts/revona-release-audit.mjs
+      - name: Revona packaging and update policy tests
+        run: node --test scripts/revona-builder.node-test.mjs electron/revona-update-policy.node-test.mjs
       - name: Structural baseline
         run: node scripts/revona-baseline.mjs
       - name: Revona credential boundary tests
