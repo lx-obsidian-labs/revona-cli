@@ -18,6 +18,8 @@ jobs:
         run: corepack enable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Generate Revona branded desktop and web icons
+        run: node scripts/generate-revona-artwork.mjs
       - name: Generate isolated Revona Windows packaging configuration
         run: node scripts/generate-revona-builder.mjs
       - name: Test Revona packaging identity and update isolation
