@@ -66,7 +66,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
         <p className="mt-1 text-[13px] text-ink-secondary">{version}</p>
         {connected && <p className="mt-0.5 text-[13px] text-ink-secondary">{connected}</p>}
         <p className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
-          A desktop home for your agents, built on {APP_NAME}: open source, Apache 2.0 licensed.
+          Revona Bot by LX Obsidian Labs. Built on {APP_NAME}, an Apache 2.0 open-source project.
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-[13px]">
           <AboutLink href={APP_REPOSITORY} label="GitHub" />
