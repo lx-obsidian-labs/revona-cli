@@ -9,17 +9,19 @@ export const REVONA_ROLES = Object.freeze({
   finance: { name: "Finance Assistant", purpose: "Categorize records and prepare financial summaries; no payments.", capabilities: ["reporting", "reconciliation"], integrations: ["accounting"] },
   projects: { name: "Project Manager", purpose: "Organize tasks, milestones and status updates.", capabilities: ["planning", "tracking"], integrations: ["project_management"] },
   research: { name: "Research Assistant", purpose: "Research topics and summarize sources.", capabilities: ["research", "summarization"], integrations: ["web"] },
-});
-const BUSINESS_ROLES = ["chief_of_staff", "email", "social", "finance", "projects"];
-const FREELANCER_ROLES = ["chief_of_staff", "email", "projects", "research"];
-const TASK_KEYWORDS = [
+} as const);
+type RoleId = keyof typeof REVONA_ROLES;
+export type WorkforceInput = { kind: "business" | "freelancer"; organization: string; goals?: string };
+const BUSINESS_ROLES: RoleId[] = ["chief_of_staff", "email", "social", "finance", "projects"];
+const FREELANCER_ROLES: RoleId[] = ["chief_of_staff", "email", "projects", "research"];
+const TASK_KEYWORDS: Array<[RegExp, RoleId]> = [
   [/email|inbox|mail|client message/i, "email"],
   [/social|marketing|post|content|tiktok|instagram/i, "social"],
   [/invoice|finance|expense|bookkeep|budget/i, "finance"],
   [/project|deadline|milestone|task|delivery/i, "projects"],
   [/research|competitor|market|investigat/i, "research"],
 ];
-export function createWorkforcePlan(input) {
+export function createWorkforcePlan(input: WorkforceInput) {
   if (!input || !["business", "freelancer"].includes(input.kind)) throw new TypeError("kind must be business or freelancer");
   const organization = String(input.organization ?? "").trim().slice(0, 120);
   if (!organization) throw new TypeError("organization is required");
