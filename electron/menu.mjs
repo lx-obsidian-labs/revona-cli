@@ -1,5 +1,5 @@
 // Electron has no role for the macOS Preferences… item, so it is built explicitly.
-import { Menu, app } from "electron";
+import { Menu, app, shell } from "electron";
 
 /** A local environment has a folder and no address. */
 const whereItLives = (environment) => (environment.kind === "local" ? environment.dataDir : new URL(environment.origin).host);
@@ -65,6 +65,9 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
     ...(home && !others.length ? [] : [server]),
     { role: "viewMenu" },
     { role: "windowMenu" },
+    { label: "Help", submenu: [
+      { label: "LX Obsidian Labs Website", click: () => { void shell.openExternal("https://www.lxobsidianportal.co.za/"); } },
+    ] },
   ];
   return Menu.buildFromTemplate(template);
 }
