@@ -1,5 +1,9 @@
 name: Revona Windows installer candidate
 on:
+  push:
+    branches: [import/openmausbot-base]
+    paths:
+      - '.github/workflows/revona-windows-installer.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,15 +32,15 @@ jobs:
       - name: List installer outputs
         shell: pwsh
         run: |
-          Get-ChildItem -Path dist -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.blockmap' } | Select-Object FullName,Length
+          Get-ChildItem -Path release -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.blockmap' } | Select-Object FullName,Length
       - name: Upload unsigned installer candidate for internal inspection
         uses: actions/upload-artifact@v4
         with:
           name: revona-windows-unsigned-candidate
           path: |
-            dist/**/*.exe
-            dist/*.exe
-            dist/**/*.blockmap
-            dist/*.blockmap
+            release/**/*.exe
+            release/*.exe
+            release/**/*.blockmap
+            release/*.blockmap
           if-no-files-found: error
           retention-days: 7
