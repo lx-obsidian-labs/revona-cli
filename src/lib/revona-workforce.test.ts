@@ -17,7 +17,7 @@ test("freelancer goals add relevant optional agents without duplicates", () => {
   assert.equal(plan.roles.length, new Set(plan.roles.map((r) => r.id)).size);
 });
 test("rejects missing business identity and invalid user type", () => {
-  assert.throws(() => createWorkforcePlan({ kind: "enterprise", organization: "X" }), TypeError);
+  assert.throws(() => createWorkforcePlan({ kind: "enterprise" as unknown as "business", organization: "X" }), TypeError);
   assert.throws(() => createWorkforcePlan({ kind: "business", organization: "  " }), TypeError);
 });
 test("template catalog contains only non-executing descriptions", () => {
