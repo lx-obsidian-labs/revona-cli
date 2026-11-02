@@ -1,0 +1,42 @@
+name: Revona Windows installer candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-installer-candidate:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check Revona identity and branding
+        run: |
+          node scripts/generate-revona-artwork.mjs
+          node scripts/generate-revona-builder.mjs
+          node --test electron/revona-branding.node-test.mjs scripts/revona-builder.node-test.mjs electron/revona-update-policy.node-test.mjs
+      - name: Build Windows installer candidate (no publishing)
+        run: pnpm revona:package:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: List installer outputs
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path dist -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.blockmap' } | Select-Object FullName,Length
+      - name: Upload unsigned installer candidate for internal inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: revona-windows-unsigned-candidate
+          path: |
+            dist/**/*.exe
+            dist/*.exe
+            dist/**/*.blockmap
+            dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 7
