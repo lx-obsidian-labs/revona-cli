@@ -1,7 +1,18 @@
 // Electron has no role for the macOS Preferences… item, so it is built explicitly.
-import { Menu, app, shell } from "electron";
+import { Menu, app, shell, dialog } from "electron";
 
 /** A local environment has a folder and no address. */
+const showRevonaAbout = () => {
+  void dialog.showMessageBox({
+    type: "info",
+    title: "About Revona Bot",
+    message: "Revona Bot",
+    detail: `Version ${app.getVersion()}\nBy LX Obsidian Labs\n\nBuilt with open-source components. Original upstream and third-party licensing notices are preserved in the installed application.`,
+    buttons: ["OK"],
+    noLink: true,
+  });
+};
+
 const whereItLives = (environment) => (environment.kind === "local" ? environment.dataDir : new URL(environment.origin).host);
 
 /**
@@ -59,13 +70,14 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
   };
   const atLogin = openAtLogin ? [{ id: "open-at-login", label: "Open at Login", type: "checkbox", checked: openAtLogin.checked, click: () => openAtLogin.onToggle(!openAtLogin.checked) }] : [];
   const template = [
-    ...(isMac ? [{ label: app.name, submenu: [{ role: "about" }, { label: "Preferences…", accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() }, ...atLogin, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
+    ...(isMac ? [{ label: app.name, submenu: [{ label: "About Revona Bot", click: () => showRevonaAbout() }, { label: "Preferences…", accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() }, ...atLogin, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
     !isMac && openAtLogin ? { label: "File", submenu: [...atLogin, { type: "separator" }, { role: "quit" }] } : { role: "fileMenu" },
     { role: "editMenu" },
     ...(home && !others.length ? [] : [server]),
     { role: "viewMenu" },
     { role: "windowMenu" },
     { label: "Help", submenu: [
+      ...(!isMac ? [{ label: "About Revona Bot", click: () => showRevonaAbout() }, { type: "separator" }] : []),
       { label: "LX Obsidian Labs Website", click: () => { void shell.openExternal("https://www.lxobsidianportal.co.za/"); } },
     ] },
   ];
