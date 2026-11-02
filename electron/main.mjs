@@ -2926,7 +2926,7 @@ app.whenReady().then(async () => {
       persistEnvironments({ ...environmentsState, activeId: LOCAL_ID });
       dialog.showErrorBox(
         "The environment's folder is missing",
-        `${boot.missingDir} is not there anymore, so OpenMausBot came up on this computer's default data folder instead. Restore or remount that folder, then choose the environment again from the Server menu.`,
+        `${boot.missingDir} is not there anymore, so Revona Bot came up on this computer's default data folder instead. Restore or remount that folder, then choose the environment again from the Server menu.`,
       );
     }
     bootDataDir = boot.dataDir;
@@ -2941,7 +2941,7 @@ app.whenReady().then(async () => {
     } catch (error) {
       dialog.showErrorBox(
         "Revona Bot could not start safely",
-        error?.message ?? "Another process is using this OpenMausBot data folder.",
+        error?.message ?? "Another process is using this Revona Bot data folder.",
       );
       app.quit();
       return;
@@ -3074,7 +3074,7 @@ app.whenReady().then(async () => {
       } catch (error) {
         dialog.showErrorBox(
           "Revona Bot could not start safely",
-          error?.message ?? "Another process is using this OpenMausBot data folder.",
+          error?.message ?? "Another process is using this Revona Bot data folder.",
         );
         app.quit();
         return;
