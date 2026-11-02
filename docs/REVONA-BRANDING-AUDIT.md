@@ -9,6 +9,7 @@ Official website: https://www.lxobsidianportal.co.za/
 - HTML title and installable web manifest use Revona Bot.
 - Desktop startup and recovery messages use Revona Bot.
 - Original layout remains unchanged.
+- Desktop Help menu links to LX Obsidian Labs; the native About dialog identifies Revona Bot and displays the installed version.
 
 ## Still required before claiming complete branding
 - Visual icons and splash artwork have been generated from the Revona SVG mark and wired into the Windows build. Visually inspect the packaged result before approval.
