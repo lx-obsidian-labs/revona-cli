@@ -11,7 +11,7 @@ Official website: https://www.lxobsidianportal.co.za/
 - Original layout remains unchanged.
 
 ## Still required before claiming complete branding
-- Replace or redesign visual icons and splash artwork; ensure new artwork is owned or properly licensed.
+- Visual icons and splash artwork have been generated from the Revona SVG mark and wired into the Windows build. Visually inspect the packaged result before approval.
 - Audit renderer strings, menus, About, settings, onboarding, notifications and user-facing URLs for upstream branding.
 - Distinguish user-facing names from internal protocol, storage, migration, import and API identifiers. Never bulk-replace internal identifiers without compatibility testing.
 - Audit Windows executable metadata, installer UI, uninstall entries, deep links and taskbar icon on a packaged build.
