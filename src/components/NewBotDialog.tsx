@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { WorkforcePlanner } from "./WorkforcePlanner";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { api, BotEditorStore, useStore, type Bot } from "@/state/store";
 import { BotCreationDraft, EMPTY_BOT_DEFAULTS } from "@/lib/bot-creation-draft";
@@ -157,6 +158,7 @@ export function NewBotDialog({ defaultsMode = false, onClose, onCreated, readyBo
         <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
+        {!defaultsMode && <WorkforcePlanner />}
         {team && !defaultsMode && teamName && <SharedInTeam team={teamName} />}
         {choosesVisibility && (
           <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
