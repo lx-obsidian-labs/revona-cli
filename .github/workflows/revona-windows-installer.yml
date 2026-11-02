@@ -29,6 +29,20 @@ jobs:
         run: pnpm revona:package:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Verify packaged executable and installer identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = 'release/win-unpacked/Revona Bot.exe'
+          if (-not (Test-Path $app)) { throw "Expected packaged Revona Bot executable missing: $app" }
+          $installer = @(Get-ChildItem -Path release -File -Filter 'Revona-Bot-*-setup.exe')
+          if ($installer.Count -ne 1) { throw "Expected exactly one Revona-branded installer; found $($installer.Count)" }
+          if ($installer[0].Length -lt 1MB) { throw 'Installer is unexpectedly small' }
+          $version = (Get-Item $app).VersionInfo
+          Write-Host "Executable: $app"
+          Write-Host "Product name: $($version.ProductName)"
+          if ($version.ProductName -ne 'Revona Bot') { throw "Packaged executable product name is not Revona Bot: $($version.ProductName)" }
+          Get-FileHash -Algorithm SHA256 $installer[0].FullName | Format-List
       - name: List installer outputs
         shell: pwsh
         run: |
