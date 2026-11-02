@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createWorkforcePlan, type WorkforceInput } from "@/lib/revona-workforce";
+import { provisionWorkforce } from "@/lib/revona-workforce-provision";
 
 /** Advisory-only workforce preview. Agent creation remains an explicit separate action. */
 export function WorkforcePlanner() {
@@ -7,6 +8,9 @@ export function WorkforcePlanner() {
   const [organization, setOrganization] = useState("");
   const [goals, setGoals] = useState("");
   const [showPlan, setShowPlan] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
   const plan = showPlan && organization.trim()
     ? createWorkforcePlan({ kind, organization, goals })
     : null;
@@ -37,6 +41,13 @@ export function WorkforcePlanner() {
               {role.reportsTo && <span className="text-ink-secondary">Reports to Chief of Staff</span>}
             </li>)}
           </ul>
+          <button type="button" disabled={creating || !!result} className="mt-3 rounded-lg bg-accent px-3 py-2 font-medium text-white disabled:opacity-40" onClick={() => {
+            if (!window.confirm(`Create ${plan.roles.length} agents? They will not have connected accounts or automatic execution permissions.`)) return;
+            setCreating(true); setError("");
+            void provisionWorkforce(plan).then(({ created }) => setResult(`${created.length} agents created. Close this dialog and refresh your agent list to see them.`)).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setCreating(false));
+          }}>{creating ? "Creating agents…" : "Approve and create these agents"}</button>
+          {result && <p role="status" className="mt-2 text-ink">{result}</p>}
+          {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
         </div>}
       </details>
     </section>
