@@ -133,7 +133,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Never let a packaged Revona build open the upstream OpenMausBot profile.
 // This must run before any userData-derived stores or credentials are created.
 if (app.isPackaged && app.getName() === "Revona Bot") {
-  app.setPath("userData", path.join(app.getPath("appData"), "Revona Bot"));
+  const revonaUserData = path.join(app.getPath("appData"), "Revona Bot");
+  fs.mkdirSync(revonaUserData, { recursive: true });
+  app.setPath("userData", revonaUserData);
 }
 
 // vite binds IPv4; a bare "localhost" can resolve to ::1.
