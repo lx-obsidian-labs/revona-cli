@@ -4,6 +4,13 @@ on:
     branches: [import/openmausbot-base]
     paths:
       - '.github/workflows/revona-windows-installer.yml'
+      - 'src/**'
+      - 'server/**'
+      - 'electron/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'cloudflare/**'
   workflow_dispatch:
 permissions:
   contents: read
