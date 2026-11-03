@@ -51,6 +51,7 @@ import { CloudSetup } from "@/components/CloudSetup";
 import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
 import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
 import { EmptyChatShell } from "@/components/onboarding/EmptyChatShell";
+import { RevonaOnboarding } from "@/components/onboarding/RevonaOnboarding";
 import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud-welcome";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -130,6 +131,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useExternalChatLinks(state, dispatch);
   usePresence(state, dispatch);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [revonaPlannerOpen, setRevonaPlannerOpen] = useState(false);
   const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
   const [, setLocaleEpoch] = useState(0);
   useEffect(() => {
@@ -317,6 +319,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
       <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
       <HomeLine />
+      {!remoteClient && state.activeView === "chat" && !chiefStep && !firstRun && !state.appSettingsOpen && <button type="button" onClick={() => setRevonaPlannerOpen(true)} className="absolute right-4 top-14 z-20 rounded-lg border border-hairline bg-card px-3 py-2 text-xs font-medium text-ink shadow-sm hover:bg-raised">Plan AI team</button>}
+      {revonaPlannerOpen && <RevonaOnboarding onClose={() => setRevonaPlannerOpen(false)} />}
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
