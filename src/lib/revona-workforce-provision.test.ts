@@ -20,6 +20,7 @@ test("approved workforce provisions named Revona agents without credentials or a
   assert.equal(calls.filter(call => call.method === "POST").length, plan.roles.length);
   assert.ok(calls.some(call => call.method === "PATCH" && call.path === "/api/bots/1"));
   assert.ok(calls.filter(call => call.method === "POST").every(call => call.body?.useDefaults === false));
+  assert.ok(calls.filter(call => call.method === "POST").every(call => call.body?.section === "Revona"));
   assert.ok(calls.filter(call => call.method === "POST").every(call => (call.body?.settings as { approvalMode: string }).approvalMode === "ask"));
   assert.ok(calls.every(call => !("reportsTo" in (call.body ?? {}))));
   assert.ok(result.created.every(bot => bot.name.startsWith("Revona")));
