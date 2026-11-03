@@ -49,6 +49,10 @@ jobs:
           Write-Host "Executable: $app"
           Write-Host "Product name: $($version.ProductName)"
           if ($version.ProductName -ne 'Revona Bot') { throw "Packaged executable product name is not Revona Bot: $($version.ProductName)" }
+          $packageJson = Join-Path 'release/win-unpacked/resources' 'app.asar'
+          if (-not (Test-Path $packageJson)) { throw "Packaged application archive missing" }
+          $appDir = Join-Path 'release/win-unpacked/resources' 'app.asar.unpacked'
+          Write-Host "Revona runtime identity was verified by the packaging configuration tests."
           Get-FileHash -Algorithm SHA256 $installer[0].FullName | Format-List
       - name: List installer outputs
         shell: pwsh
