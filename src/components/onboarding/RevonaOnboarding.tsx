@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "@/state/store";
+import { provisionWorkforce } from "@/lib/revona-workforce-provision";
 import { createWorkforcePlan, type WorkforceInput } from "@/lib/revona-workforce";
 
 type Step = "kind" | "organization" | "goals" | "review";
@@ -35,26 +35,11 @@ export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
     setCreationStarted(true);
     setCreating(true);
     setError("");
-    const completed: Array<{ id: string; name: string }> = [];
-    let chiefId: string | undefined;
     try {
-      for (const role of plan.roles) {
-        const response = await api<{ bot: { id: string; name: string } }>("/api/bots", {
-          method: "POST",
-          body: JSON.stringify({
-            name: role.name,
-            title: role.name,
-            description: `${role.purpose} Organization: ${plan.organization}. Goals: ${plan.goals}. Ask for approval before external actions.`,
-            useDefaults: false,
-            ...(role.reportsTo && chiefId ? { reportsTo: chiefId } : {}),
-          }),
-        });
-        completed.push({ id: response.bot.id, name: response.bot.name });
-        setCreated([...completed]);
-        if (role.id === "chief_of_staff") chiefId = response.bot.id;
-      }
+      const result = await provisionWorkforce(plan);
+      setCreated(result.created.map(bot => ({ id: bot.id, name: bot.name })));
     } catch (cause) {
-      setError(`Created ${completed.length} of ${plan.roles.length} profiles. ${cause instanceof Error ? cause.message : String(cause)}. Review existing agents before retrying to avoid duplicates.`);
+      setError(`Team creation failed: ${cause instanceof Error ? cause.message : String(cause)}. Check the agent list before trying again.`);
     } finally {
       setCreating(false);
     }
