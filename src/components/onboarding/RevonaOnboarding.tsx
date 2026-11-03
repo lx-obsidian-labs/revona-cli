@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "@/state/store";
 import { createWorkforcePlan, type WorkforceInput } from "@/lib/revona-workforce";
 
 type Step = "kind" | "organization" | "goals" | "review";
@@ -9,6 +10,9 @@ export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
   const [goals, setGoals] = useState("");
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<Array<{ id: string; name: string }>>([]);
+  const [creationStarted, setCreationStarted] = useState(false);
   const plan = step === "review" ? createWorkforcePlan({ kind, organization, goals }) : null;
   const questions: Record<Exclude<Step, "review">, string> = {
     kind: "Welcome to Revona. Are we building a team for a business or your freelance work?",
@@ -24,6 +28,36 @@ export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
     }
     if (!answer.trim()) { setError("Tell Revona at least one goal."); return; }
     setGoals(answer.trim()); setAnswer(""); setStep("review");
+  }
+  async function createApprovedTeam() {
+    if (!plan || creating || creationStarted) return;
+    if (!window.confirm(`Create ${plan.roles.length} inactive-by-default AI agent profiles for ${plan.organization}? This does not connect accounts, grant tool permissions, or execute tasks.`)) return;
+    setCreationStarted(true);
+    setCreating(true);
+    setError("");
+    const completed: Array<{ id: string; name: string }> = [];
+    let chiefId: string | undefined;
+    try {
+      for (const role of plan.roles) {
+        const response = await api<{ bot: { id: string; name: string } }>("/api/bots", {
+          method: "POST",
+          body: JSON.stringify({
+            name: role.name,
+            title: role.name,
+            description: `${role.purpose} Organization: ${plan.organization}. Goals: ${plan.goals}. Ask for approval before external actions.`,
+            useDefaults: false,
+            ...(role.reportsTo && chiefId ? { reportsTo: chiefId } : {}),
+          }),
+        });
+        completed.push({ id: response.bot.id, name: response.bot.name });
+        setCreated([...completed]);
+        if (role.id === "chief_of_staff") chiefId = response.bot.id;
+      }
+    } catch (cause) {
+      setError(`Created ${completed.length} of ${plan.roles.length} profiles. ${cause instanceof Error ? cause.message : String(cause)}. Review existing agents before retrying to avoid duplicates.`);
+    } finally {
+      setCreating(false);
+    }
   }
   function exportPlan() {
     if (!plan) return;
@@ -46,8 +80,10 @@ export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
       </> : <>
         <p className="mb-3">Here is your proposed team for <strong>{plan!.organization}</strong>. Review each role before enabling any integrations.</p>
         <div className="max-h-72 space-y-2 overflow-y-auto">{plan!.roles.map((role) => <div key={role.id} className="rounded-lg border border-hairline p-3"><strong>{role.name}</strong><p className="text-sm text-ink-secondary">{role.purpose}</p></div>)}</div>
-        <p className="my-4 text-sm text-ink-secondary">Preview only: no agents have been created, no credentials connected and no tasks executed.</p>
-        <div className="flex gap-3"><button type="button" onClick={() => { setAnswer(goals); setStep("goals"); }} className="rounded-lg border border-hairline px-4 py-2">Edit goals</button><button type="button" onClick={exportPlan} className="rounded-lg bg-ink px-4 py-2 text-app">Export team plan</button></div>
+        <p className="my-4 text-sm text-ink-secondary">Agent profiles are created only after explicit confirmation. Account connections, permissions and task execution remain separate.</p>
+        {created.length > 0 && <p role="status" className="mb-3 text-sm">{created.length} agent profile(s) created. Configure their models and permissions in Revona before use.</p>}
+        {error && <p role="alert" className="mb-3 text-sm text-red-500">{error}</p>}
+        <div className="flex flex-wrap gap-3"><button type="button" disabled={creationStarted} onClick={() => { setAnswer(goals); setStep("goals"); }} className="rounded-lg border border-hairline px-4 py-2">Edit goals</button><button type="button" onClick={exportPlan} className="rounded-lg bg-ink px-4 py-2 text-app">Export team plan</button><button type="button" disabled={creating || creationStarted} onClick={createApprovedTeam} className="rounded-lg border border-hairline px-4 py-2 disabled:opacity-50">{creating ? "Creating agents…" : creationStarted ? "Creation attempted" : "Approve and create agents"}</button></div>
       </>}
     </section>
   </div>;
