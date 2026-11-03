@@ -10,6 +10,8 @@ const config = {
   ...source,
   appId: "za.co.lxobsidian.revona",
   productName: "Revona Bot",
+  // Electron reads app identity from the packaged package.json, not only the NSIS label.
+  extraMetadata: { ...(source.extraMetadata ?? {}), name: "revona-bot", productName: "Revona Bot" },
   artifactName: "Revona-Bot-${version}-${arch}.${ext}",
   protocols: [{ name: "Revona Bot", schemes: ["revona"] }],
   // Do not publish or generate update metadata targeting upstream releases.
