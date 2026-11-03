@@ -130,6 +130,12 @@ const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-ser
 const { MIN_BOUNDS, normalizeUnreadCount, resolveWindowState } = require("./window-state.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Never let a packaged Revona build open the upstream OpenMausBot profile.
+// This must run before any userData-derived stores or credentials are created.
+if (app.isPackaged && app.getName() === "Revona Bot") {
+  app.setPath("userData", path.join(app.getPath("appData"), "Revona Bot"));
+}
+
 // vite binds IPv4; a bare "localhost" can resolve to ::1.
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
