@@ -3,12 +3,12 @@
  * permissions or external side effects are granted by choosing a template.
  */
 export const REVONA_ROLES = Object.freeze({
-  chief_of_staff: { name: "Chief of Staff", purpose: "Coordinate work, propose assignments and report progress.", capabilities: ["planning", "delegation"], integrations: [] },
-  email: { name: "Email Assistant", purpose: "Draft and organize correspondence for approval.", capabilities: ["drafting", "inbox_triage"], integrations: ["email"] },
-  social: { name: "Social Media Manager", purpose: "Plan content and prepare posts for review.", capabilities: ["content_planning", "drafting"], integrations: ["social"] },
-  finance: { name: "Finance Assistant", purpose: "Categorize records and prepare financial summaries; no payments.", capabilities: ["reporting", "reconciliation"], integrations: ["accounting"] },
-  projects: { name: "Project Manager", purpose: "Organize tasks, milestones and status updates.", capabilities: ["planning", "tracking"], integrations: ["project_management"] },
-  research: { name: "Research Assistant", purpose: "Research topics and summarize sources.", capabilities: ["research", "summarization"], integrations: ["web"] },
+  chief_of_staff: { name: "Revona Chief of Staff", purpose: "Coordinate work, propose assignments and report progress.", capabilities: ["planning", "delegation"], integrations: [] },
+  email: { name: "Revona Communications", purpose: "Draft and organize correspondence for approval.", capabilities: ["drafting", "inbox_triage"], integrations: ["email"] },
+  social: { name: "Revona Creative", purpose: "Plan content and prepare posts for review.", capabilities: ["content_planning", "drafting"], integrations: ["social"] },
+  finance: { name: "Revona Finance", purpose: "Categorize records and prepare financial summaries; no payments.", capabilities: ["reporting", "reconciliation"], integrations: ["accounting"] },
+  projects: { name: "Revona Operations", purpose: "Organize tasks, milestones and status updates.", capabilities: ["planning", "tracking"], integrations: ["project_management"] },
+  research: { name: "Revona Intelligence", purpose: "Research topics and summarize sources.", capabilities: ["research", "summarization"], integrations: ["web"] },
 } as const);
 type RoleId = keyof typeof REVONA_ROLES;
 export type WorkforceInput = { kind: "business" | "freelancer"; organization: string; goals?: string };
