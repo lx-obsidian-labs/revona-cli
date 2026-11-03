@@ -10,6 +10,8 @@ test("Revona packaging has independent identity and no upstream update feed", ()
   const config = YAML.parse(readFileSync(resolve("dist-revona/electron-builder.revona.yml"), "utf8"));
   assert.equal(config.appId, "za.co.lxobsidian.revona");
   assert.equal(config.productName, "Revona Bot");
+  assert.equal(config.extraMetadata.name, "revona-bot");
+  assert.equal(config.extraMetadata.productName, "Revona Bot");
   assert.equal(config.publish, null);
   assert.equal(config.generateUpdatesFilesForAllChannels, undefined);
   assert.equal(config.nsis.shortcutName, "Revona Bot");
