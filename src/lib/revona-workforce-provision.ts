@@ -26,7 +26,7 @@ export async function provisionWorkforce(
         body: JSON.stringify({
           name: role.name,
           title: role.name,
-          description: role.purpose,
+          description: `${role.purpose} Team: ${plan.organization}. ${role.id === "chief_of_staff" ? "Coordinate approved specialist tasks using the existing list_bots and coordinate_bots tools when available; confirm actual outcomes and never claim unverified completion." : "Work only within granted tools and permissions. Report findings to the coordinating Chief of Staff."}`,
           useDefaults: false,
           settings: { approvalMode: "ask" },
         }),
