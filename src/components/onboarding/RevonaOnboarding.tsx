@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { provisionWorkforce } from "@/lib/revona-workforce-provision";
+import { RevonaDelegationPreview } from "./RevonaDelegationPreview";
 import { createWorkforcePlan, type WorkforceInput } from "@/lib/revona-workforce";
 
 type Step = "kind" | "organization" | "goals" | "review";
@@ -68,6 +69,7 @@ export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
         <p className="my-4 text-sm text-ink-secondary">Agent profiles are created only after explicit confirmation. Account connections, permissions and task execution remain separate.</p>
         {created.length > 0 && <p role="status" className="mb-3 text-sm">{created.length} agent profile(s) created. Configure their models and permissions in Revona before use.</p>}
         {error && <p role="alert" className="mb-3 text-sm text-red-500">{error}</p>}
+        {created.length === plan!.roles.length && <RevonaDelegationPreview plan={plan!} />}
         <div className="flex flex-wrap gap-3"><button type="button" disabled={creationStarted} onClick={() => { setAnswer(goals); setStep("goals"); }} className="rounded-lg border border-hairline px-4 py-2">Edit goals</button><button type="button" onClick={exportPlan} className="rounded-lg bg-ink px-4 py-2 text-app">Export team plan</button><button type="button" disabled={creating || creationStarted} onClick={createApprovedTeam} className="rounded-lg border border-hairline px-4 py-2 disabled:opacity-50">{creating ? "Creating agents…" : creationStarted ? "Creation attempted" : "Approve and create agents"}</button></div>
       </>}
     </section>
