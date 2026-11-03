@@ -45,3 +45,39 @@ test("rejects an execution-enabled or unapproved workforce proposal", async () =
   await assert.rejects(provisionWorkforce({ ...plan, executionEnabled: true }, request), /Invalid workforce proposal/);
   await assert.rejects(provisionWorkforce({ ...plan, roles: plan.roles.map((role, index) => index ? role : { ...role, requiresApproval: false }) }, request), /Only unactivated proposals/);
 });
+
+test("Chief configuration failure is surfaced without deleting created agents", async () => {
+  const plan = createWorkforcePlan({ kind: "business", organization: "Example", goals: "Marketing" });
+  const calls: Array<{ path: string; method: string }> = [];
+  let count = 0;
+  const request = (async (path: string, options?: RequestInit) => {
+    const method = options?.method ?? "GET";
+    calls.push({ path, method });
+    if (method === "PATCH") throw new Error("permission denied");
+    if (method === "POST") {
+      count++;
+      return { bot: fakeBot(String(count), "Revona agent") };
+    }
+    throw new Error("unexpected request");
+  }) as Request;
+  const result = await provisionWorkforce(plan, request);
+  assert.equal(result.created.length, plan.roles.length);
+  assert.ok(result.warnings.some(warning => /Chief of Staff designation needs review: permission denied/.test(warning)));
+  assert.equal(calls.filter(call => call.method === "DELETE").length, 0);
+});
+
+test("Chief configuration uses the created Chief ID, not an assumed fixed ID", async () => {
+  const plan = createWorkforcePlan({ kind: "freelancer", organization: "Example", goals: "Research" });
+  const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
+  const request = (async (path: string, options?: RequestInit) => {
+    const method = options?.method ?? "GET";
+    const body = options?.body ? JSON.parse(String(options.body)) as Record<string, unknown> : undefined;
+    calls.push({ path, method, body });
+    if (method === "POST") return { bot: fakeBot(`agent-${calls.length}`, String(body?.name)) };
+    return {};
+  }) as Request;
+  await provisionWorkforce(plan, request);
+  const patch = calls.find(call => call.method === "PATCH");
+  assert.equal(patch?.path, "/api/bots/agent-1");
+  assert.deepEqual(patch?.body, { chiefOfStaff: true });
+});
