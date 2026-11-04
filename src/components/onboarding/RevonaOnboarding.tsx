@@ -4,7 +4,7 @@ import { RevonaDelegationPreview } from "./RevonaDelegationPreview";
 import { createWorkforcePlan, type WorkforceInput } from "@/lib/revona-workforce";
 
 type Step = "kind" | "organization" | "goals" | "review";
-export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
+export function RevonaOnboarding({ onClose, onOpenChief }: { onClose: () => void; onOpenChief: (chiefId: string) => void }) {
   const [step, setStep] = useState<Step>("kind");
   const [kind, setKind] = useState<WorkforceInput["kind"]>("business");
   const [organization, setOrganization] = useState("");
@@ -73,6 +73,13 @@ export function RevonaOnboarding({ onClose }: { onClose: () => void }) {
         {error && <p role="alert" className="mb-3 text-sm text-red-500">{error}</p>}
         {warnings.map((warning, index) => <p key={index} role="status" className="mb-2 text-sm text-ink-secondary">{warning}</p>)}
         {created.length === plan!.roles.length && <RevonaDelegationPreview plan={plan!} />}
+        {created.length === plan!.roles.length && (() => {
+          const chief = created[plan!.roles.findIndex(role => role.id === "chief_of_staff")];
+          return chief ? <div className="my-4 rounded-lg border border-hairline p-3">
+            <p className="mb-2 text-sm text-ink-secondary">Configure a compatible AI model and review permissions before assigning live work.</p>
+            <button type="button" onClick={() => onOpenChief(chief.id)} className="rounded-lg bg-ink px-4 py-2 text-app">Open Chief of Staff</button>
+          </div> : null;
+        })()}
         <div className="flex flex-wrap gap-3"><button type="button" disabled={creationStarted} onClick={() => { setAnswer(goals); setStep("goals"); }} className="rounded-lg border border-hairline px-4 py-2">Edit goals</button><button type="button" onClick={exportPlan} className="rounded-lg bg-ink px-4 py-2 text-app">Export team plan</button><button type="button" disabled={creating || creationStarted} onClick={createApprovedTeam} className="rounded-lg border border-hairline px-4 py-2 disabled:opacity-50">{creating ? "Creating agents…" : creationStarted ? "Creation attempted" : "Approve and create agents"}</button></div>
       </>}
     </section>
