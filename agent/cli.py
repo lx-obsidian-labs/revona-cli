@@ -1,4 +1,5 @@
 import copy
+import os
 import re
 from pathlib import Path
 
@@ -330,7 +331,7 @@ def plan_cmd(prompt, model):
 
 
 @cli.command()
-@click.option("--key", help="Set NVIDIA_API_KEY (prefer env var)")
+@click.option("--key", help="Deprecated: key is ignored; use NVIDIA_API_KEY environment variable")
 @click.option("--model", "-m", help="Set default model ID")
 @click.option("--list-models", is_flag=True, help="List cached models")
 def config(key, model, list_models):
@@ -367,7 +368,7 @@ def config(key, model, list_models):
 
     if not changed:
         console.print(f"Model:  [bold]{cfg.get('model')}[/]")
-        status = "set" if cfg.get("api_key") else "not set"
+        status = "set" if os.environ.get("NVIDIA_API_KEY") else "not set"
         console.print(f"API key: {status} (use NVIDIA_API_KEY env)")
         console.print(f"Cache:  {len(load_cached_models())} models")
 
