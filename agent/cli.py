@@ -349,9 +349,11 @@ def config(key, model, list_models):
     changed = False
 
     if key:
-        console.print("[yellow]Set the env var instead:[/]")
-        console.print(f"  $env:NVIDIA_API_KEY='{key}'  (PowerShell)")
-        console.print(f"  export NVIDIA_API_KEY='{key}'  (bash)")
+        console.print("[yellow]For security, API keys are not saved or echoed.[/]")
+        console.print("Set NVIDIA_API_KEY in your shell environment instead.")
+        console.print("PowerShell: $env:NVIDIA_API_KEY = '<your-key>'")
+        console.print("Bash: export NVIDIA_API_KEY='<your-key>'")
+        console.print("[yellow]If you entered a real key on a shared terminal, rotate it.[/]")
 
     if model:
         cached = load_cached_models()
