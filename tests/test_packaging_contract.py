@@ -38,5 +38,23 @@ class PackagingContractTests(unittest.TestCase):
         )
 
 
+    def test_cli_does_not_echo_supplied_api_key(self):
+        """Regression guard: the config command must not interpolate secret values."""
+        tree = ast.parse((ROOT / "agent" / "cli.py").read_text(encoding="utf-8"))
+        fn = next(node for node in tree.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "config")
+        key_branch = next(node for node in fn.body
+                          if isinstance(node, ast.If)
+                          and isinstance(node.test, ast.Name)
+                          and node.test.id == "key")
+        for node in ast.walk(key_branch):
+            if isinstance(node, ast.JoinedStr):
+                for value in node.values:
+                    if isinstance(value, ast.FormattedValue) and isinstance(value.value, ast.Name):
+                        self.assertNotEqual(value.value.id, "key",
+                                            "API key must not be interpolated into console output")
+
+
+
 if __name__ == "__main__":
     unittest.main()
