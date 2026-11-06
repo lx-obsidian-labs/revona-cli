@@ -29,8 +29,17 @@ def _safe_shell(cmd: str) -> bool:
     return tokens[0].lower() in allowed
 
 
+def _workspace_path(path: str) -> Path:
+    """Resolve file tools inside the configured workspace, including symlinks."""
+    root = Path(os.environ.get("REVONA_WORKSPACE", os.getcwd())).resolve()
+    candidate = (root / path).resolve()
+    if not candidate.is_relative_to(root):
+        raise ValueError("Path is outside the Revona workspace")
+    return candidate
+
+
 def read_file(path: str) -> str:
-    p = Path(path)
+    p = _workspace_path(path)
     if not p.exists():
         return f"ERROR: file not found: {path}"
     try:
@@ -40,14 +49,14 @@ def read_file(path: str) -> str:
 
 
 def write_file(path: str, content: str) -> str:
-    p = Path(path)
+    p = _workspace_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"Wrote {path} ({len(content)} bytes)"
 
 
 def edit_file(path: str, old: str, new: str) -> str:
-    p = Path(path)
+    p = _workspace_path(path)
     if not p.exists():
         return f"ERROR: file not found: {path}"
     text = p.read_text(encoding="utf-8", errors="ignore")
@@ -59,7 +68,7 @@ def edit_file(path: str, old: str, new: str) -> str:
 
 
 def list_files(path: str = ".") -> str:
-    p = Path(path)
+    p = _workspace_path(path)
     if not p.exists():
         return f"ERROR: path not found: {path}"
     items = sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name))
@@ -70,7 +79,7 @@ def list_files(path: str = ".") -> str:
 
 def grep_files(pattern: str, path: str = ".") -> str:
     out = []
-    for root, dirs, files in os.walk(path):
+    for root, dirs, files in os.walk(_workspace_path(path)):
         dirs[:] = [d for d in dirs if d not in __import__("agent").IGNORE_DIRS]
         for fn in files:
             fp = Path(root) / fn
