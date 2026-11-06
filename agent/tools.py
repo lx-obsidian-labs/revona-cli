@@ -84,6 +84,7 @@ def grep_files(pattern: str, path: str = ".") -> str:
         for fn in files:
             fp = Path(root) / fn
             try:
+                fp = _workspace_path(str(fp))
                 for i, line in enumerate(fp.read_text(errors="ignore").splitlines(), 1):
                     if pattern in line:
                         out.append(f"{fp}:{i}: {line}")
@@ -100,8 +101,11 @@ def run_shell(command: str, cwd: str = ".") -> str:
         return "BLOCKED: command executable is not permitted."
     try:
         argv = shlex.split(command)
+        safe_cwd = _workspace_path(cwd)
+        if not safe_cwd.is_dir():
+            return "ERROR: command working directory does not exist."
         result = subprocess.run(
-            argv, shell=False, cwd=cwd, capture_output=True,
+            argv, shell=False, cwd=safe_cwd, capture_output=True,
             text=True, timeout=300,
         )
         body = (result.stdout or "") + (result.stderr or "")
