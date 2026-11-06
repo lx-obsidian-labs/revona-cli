@@ -2,6 +2,13 @@
 
 **Developer automation project | LX Obsidian Labs**
 
+**Development stage:** Active Development (not a production-readiness claim)  
+**Verification:** Automated tests and CI are configured; passing workflow results have not been independently confirmed.  
+**Implemented scope under review:** CLI packaging, agent configuration, session storage, file tools and opt-in command execution.  
+**Next milestone:** Confirm CI results and verify tool authorization and filesystem security end to end.
+
+Development stage and engineering quality are separate assessments. Unimplemented roadmap features are not defects; weaknesses in implemented security boundaries remain relevant. [Evaluation standard](https://github.com/lx-obsidian-labs/lx-obsidian-labs/blob/main/PORTFOLIO_EVALUATION.md).
+
 Revona CLI is part of LX Obsidian Labs' exploration of AI-assisted development workflows and agent tooling.
 
 > **Verification status:** This introduction does not certify the current CLI commands, supported providers, installation procedure or release readiness. Review the source and release artifacts before using this software.
@@ -33,6 +40,16 @@ These are areas for technical review, **not a verified list of completed feature
 - [ ] Add automated tests and CI evidence
 - [ ] Publish versioned releases and a changelog
 - [ ] Add license and third-party attribution after review
+
+## Evidence and security
+
+- [Python test workflow](.github/workflows/python-package.yml)
+- [Workspace boundary regression tests](tests/test_workspace_boundary.py)
+- [Shell execution boundary tests](tests/test_shell_boundary.py)
+- [Security model and limitations](docs/SECURITY_MODEL.md)
+- [Engineering case study](docs/ENGINEERING_CASE_STUDY.md)
+
+These links identify inspectable implementation and test assets; they are not a substitute for a passing CI run.
 
 ## Engineering portfolio
 
