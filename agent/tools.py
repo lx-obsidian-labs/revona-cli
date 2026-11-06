@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import shlex
 from pathlib import Path
 
 import requests
@@ -13,8 +14,19 @@ SHELL_ALLOWLIST = (
 
 
 def _safe_shell(cmd: str) -> bool:
-    c = cmd.strip().lower()
-    return any(c.startswith(allow) for allow in SHELL_ALLOWLIST)
+    """Only permit an exact executable token, never prefix matches."""
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+    allowed = {"npm", "pnpm", "yarn", "node", "python", "python3",
+               "pytest", "pip", "cargo", "go", "make", "ls", "cat",
+               "ruff", "black", "mypy", "tsc", "eslint", "prettier"}
+    if tokens[0].lower() == "git":
+        return len(tokens) >= 2 and tokens[1].lower() in {"status", "diff", "log"}
+    return tokens[0].lower() in allowed
 
 
 def read_file(path: str) -> str:
@@ -72,22 +84,23 @@ def grep_files(pattern: str, path: str = ".") -> str:
 
 
 def run_shell(command: str, cwd: str = ".") -> str:
+    """Run an explicitly enabled command without a shell interpreter."""
+    if os.environ.get("REVONA_ALLOW_SHELL") != "1":
+        return "BLOCKED: shell execution disabled. Set REVONA_ALLOW_SHELL=1 to opt in."
     if not _safe_shell(command):
-        return (
-            f"BLOCKED: '{command}' is not in the shell allowlist. "
-            "Allowed prefixes: " + ", ".join(SHELL_ALLOWLIST)
-        )
+        return "BLOCKED: command executable is not permitted."
     try:
-        r = subprocess.run(
-            command, shell=True, cwd=cwd, capture_output=True,
+        argv = shlex.split(command)
+        result = subprocess.run(
+            argv, shell=False, cwd=cwd, capture_output=True,
             text=True, timeout=300,
         )
-        body = (r.stdout or "") + (r.stderr or "")
-        return f"exit={r.returncode}\n{body[:8000]}"
+        body = (result.stdout or "") + (result.stderr or "")
+        return f"exit={result.returncode}\\n{body[:8000]}"
     except subprocess.TimeoutExpired:
         return "ERROR: command timed out (300s)."
-    except Exception as e:
-        return f"ERROR: {e}"
+    except Exception as exc:
+        return f"ERROR: {exc}"
 
 
 def web_fetch(url: str) -> str:
