@@ -18,6 +18,19 @@ class WorkspaceHardeningTests(unittest.TestCase):
                 result = tools.run_shell("python --version", cwd=outside)
                 self.assertIn("ERROR", result)
 
+    def test_command_can_use_workspace_subdirectory(self):
+        with TemporaryDirectory() as workspace:
+            child = Path(workspace) / "src"
+            child.mkdir()
+            with patch.dict(os.environ, {"REVONA_WORKSPACE": workspace, "REVONA_ALLOW_SHELL": "1"}):
+                with patch("agent.tools.subprocess.run") as runner:
+                    runner.return_value.returncode = 0
+                    runner.return_value.stdout = "ok"
+                    runner.return_value.stderr = ""
+                    result = tools.run_shell("python --version", cwd="src")
+                    self.assertIn("exit=0", result)
+                    self.assertEqual(Path(runner.call_args.kwargs["cwd"]), child.resolve())
+
     def test_file_search_does_not_read_symlinked_outside_file(self):
         with TemporaryDirectory() as workspace, TemporaryDirectory() as outside:
             secret = Path(outside) / "private.txt"
