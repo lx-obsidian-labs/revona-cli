@@ -3,6 +3,7 @@
 **Developer automation project | LX Obsidian Labs**
 
 **Development stage:** Active Development (not a production-readiness claim)  
+**CI evidence (2026-11-07):** [Python package smoke test run 42397053506](https://github.com/lx-obsidian-labs/revona-cli/actions/runs/42397053506) completed successfully at commit `217acf1338b2b32a32991bbb0615396dd80a66ce`. End-to-end command security remains unverified.  
 **Verification:** Automated tests and CI are configured; the workspace-hardening PR was merged on 2026-11-06 as commit `29ae775ab620490a3aaaa280546736d894af8052`; current default-branch CI results and end-to-end behavior still require independent verification.  
 **Implemented scope under review:** CLI packaging, agent configuration, session storage, file tools and opt-in command execution.  
 **Next milestone:** Verify the merged workspace-hardening changes on the default branch, then test tool authorization, filesystem boundaries and shell execution end to end.
