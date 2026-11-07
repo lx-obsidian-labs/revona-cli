@@ -3,9 +3,9 @@
 **Developer automation project | LX Obsidian Labs**
 
 **Development stage:** Active Development (not a production-readiness claim)  
-**Verification:** Automated tests and CI are configured; the security-hardening PR passed Python 3.11 and 3.12 package CI on commit `1a2c5dfe`; the change remains unmerged.  
+**Verification:** Automated tests and CI are configured; the workspace-hardening PR was merged on 2026-11-06 as commit `29ae775ab620490a3aaaa280546736d894af8052`; current default-branch CI results and end-to-end behavior still require independent verification.  
 **Implemented scope under review:** CLI packaging, agent configuration, session storage, file tools and opt-in command execution.  
-**Next milestone:** Review and merge the workspace-hardening PR after checking regression-test coverage, then verify tool authorization and filesystem security end to end.
+**Next milestone:** Verify the merged workspace-hardening changes on the default branch, then test tool authorization, filesystem boundaries and shell execution end to end.
 
 Development stage and engineering quality are separate assessments. Unimplemented roadmap features are not defects; weaknesses in implemented security boundaries remain relevant. [Evaluation standard](https://github.com/lx-obsidian-labs/lx-obsidian-labs/blob/main/PORTFOLIO_EVALUATION.md).
 
