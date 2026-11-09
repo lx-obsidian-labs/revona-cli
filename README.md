@@ -1,3 +1,7 @@
+> **Revona Bot desktop development branch — not a production release.** This repository branch is a Revona prototype built on OpenMausBot. The original OpenMausBot documentation below is retained for upstream attribution and technical reference. **Its download buttons link to upstream OpenMausBot, not Revona.** For verified Revona build evidence, current limitations and release gates, read [Revona progress](docs/REVONA_PROGRESS.md). The Python CLI on `main` is a separate development track.
+
+---
+
 <div align="center">
 
 # OpenMausBot
