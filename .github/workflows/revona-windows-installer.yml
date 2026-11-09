@@ -11,6 +11,7 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'cloudflare/**'
+      - 'docs/REVONA_PROGRESS.md'
   workflow_dispatch:
 permissions:
   contents: read
