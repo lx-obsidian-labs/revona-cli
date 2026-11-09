@@ -51,12 +51,32 @@ async function officialBinary() {
   await mkdir(cache, { recursive: true });
   const url = `https://github.com/trycua/cua/releases/download/cua-driver-rs-v${release.version}/${release.file}`;
   console.log(`Downloading CUA Driver ${release.version} from the official release…`);
-  const response = await fetch(url, {
-    headers: { "user-agent": "OpenMausBot-packager" },
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) throw new Error(`CUA Driver download failed: HTTP ${response.status}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
+  // GitHub release downloads occasionally return transient 5xx responses.
+  // Retry only transient failures; checksum and version checks remain mandatory.
+  let bytes;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { "user-agent": "RevonaBot-packager" },
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!response.ok) {
+        const error = new Error(`CUA Driver download failed: HTTP ${response.status}`);
+        if (response.status !== 408 && response.status !== 429 && response.status < 500) throw error;
+        if (attempt === 5) throw error;
+      } else {
+        bytes = Buffer.from(await response.arrayBuffer());
+        break;
+      }
+    } catch (error) {
+      if (attempt === 5 || (error instanceof Error && /HTTP 4(?!08|29)\\d{2}/.test(error.message))) throw error;
+      console.warn(`CUA download attempt ${attempt} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const delayMs = Math.min(30_000, 2000 * 2 ** (attempt - 1));
+    console.warn(`Retrying CUA download in ${delayMs / 1000}s (attempt ${attempt + 1}/5)…`);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  if (!bytes) throw new Error("CUA Driver download failed after 5 attempts");
   const digest = createHash("sha256").update(bytes).digest("hex");
   if (digest !== release.sha256) {
     throw new Error(`CUA Driver checksum mismatch: expected ${release.sha256}, got ${digest}`);
